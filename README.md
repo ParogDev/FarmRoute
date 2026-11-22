@@ -25,6 +25,10 @@ It comes with two seed routes: the Battered Footlocker loop (upper floor) and th
 | `/fr radius <yards>`, `/fr auto on\|off` | Arrival radius, and whether arriving moves the pin |
 | `/fr respawn <minutes> [n]`, `/fr timers reset` | Respawn timers |
 | `/fr mode pin\|tomtom`, `/fr line`, `/fr map`, `/fr minimap` | Display options |
+| `/fr skip` (or the Skip keybind), `/fr follow on\|off` | Skip the point; follow chests the game soft-targets |
+| `/fr suggestskip on\|off`, `/fr autoskip on\|off` | When nothing is detected near a point: say so, or move on |
+| `/fr fixinteract`, `/fr restorecvars`, `/fr interact` | Turn chest detection on, put your settings back, show who changed the interact key |
+| `/fr keepinteract on\|off`, `/fr probe [on\|off]` | Keep the interact key on; show what detection has measured |
 
 ## Development
 

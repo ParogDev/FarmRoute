@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.4
+
+- A chest counts as looted only when the loot window opens for it. A chair taking the soft target no longer moves the route on.
+- A visit counts as empty only when detection could work (health OK, out of combat). Otherwise no history entry is made.
+- Switching route, `/fr goto` and every pin move reset the point's wait. The chests seen this loop are kept per route.
+- `/fr off` in combat puts your soft-target settings back when combat ends. Skips start no respawn timer.
+
+## 0.2.3
+
+- `/fr keepinteract` leaves your own change in Options > Controls alone and only undoes addons. A put-back blocked by combat happens when combat ends. Its log entries now read "FarmRoute (keepinteract)".
+
+## 0.2.2
+
+- Probe chat lines are only for chests of the active route, once per chest every 30 s. Chairs and stools that take the soft target stay in the saved log only.
+
+## 0.2.1
+
+- The minimum Lockpicking now comes from the mouseover tooltip: in game, the soft target's own tooltip has no lines. Hover a footlocker once and the marker shows its level from then on.
+
+## 0.2.0
+
+- A footlocker the game is soft-targeting (the interact key's target) becomes the objective: the pin jumps to the nearest route point and stays there until the chest is looted.
+- The pin goes to the next point not checked this loop. Each visit records whether a chest was there. A point empty on its last 3 visits is passed over for 2 loops. `/fr list` shows the history.
+- New marker: a small diamond above the point with the minimum Lockpicking, coloured by whether your skill opens it. It fills and pulses while the chest is detected.
+- Detection health on screen: the interact key off, detection limited to interact range, or a range under 15 yards is named, with who changed it and a Fix button (out of combat). Your own settings are saved first and put back by `/fr off` or `/fr restorecvars`.
+- Skip keybind. `/fr suggestskip` and `/fr autoskip` (both off) act when you stand near a point with nothing detected. `/fr follow off` stops following detected chests.
+- `/fr probe` shows what soft-interact has measured. It prints a chat line per change while on (`/fr probe off`).
+
+## 0.1.7
+
+- `/fr keepinteract` (on by default) puts the interact key back to 3 when something changes it, outside combat, and stops with a message when another addon keeps changing it back.
+
 ## 0.1.6
 
 - The on-screen line now starts at the character, is thinner and fainter, and follows the marker every frame.

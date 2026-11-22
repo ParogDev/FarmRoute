@@ -124,3 +124,93 @@ describe("walking the loop", function()
 		assert.is_nil(L.clampRadius("x"))
 	end)
 end)
+
+describe("soft-interact reading", function()
+	it("takes the object id from a game object GUID only", function()
+		assert.equals(179490, L.guidObject("GameObject-0-4170-0-12-179490-0000123ABC"))
+		assert.is_nil(L.guidObject("Creature-0-4170-0-12-2725-0000123ABC"))
+		assert.is_nil(L.guidObject(nil))
+	end)
+	it("reads 'Requires Lockpicking (N)' through ITEM_MIN_SKILL", function()
+		local pat = L.requiresPattern("Requires %s (%d)")
+		local skill, level = L.parseRequires({ "Battered Footlocker", "Requires Lockpicking (150)" }, pat)
+		assert.equals("Lockpicking", skill)
+		assert.equals(150, level)
+		assert.is_nil(L.parseRequires({ "Battered Footlocker", "Locked" }, pat))
+	end)
+	it("takes positional format strings", function()
+		local pat = L.requiresPattern("Benötigt %1$s (%2$d)")
+		local skill, level = L.parseRequires({ "Benötigt Schlossknacken (175)" }, pat)
+		assert.equals("Schlossknacken", skill)
+		assert.equals(175, level)
+	end)
+	it("keeps a list short", function()
+		local t = {}
+		for i = 1, 5 do
+			L.push(t, i, 3)
+		end
+		assert.same({ 3, 4, 5 }, t)
+	end)
+end)
+
+describe("objective", function()
+	local function route(n)
+		local r = { name = "R", points = {}, respawn = 0 }
+		for i = 1, n do
+			r.points[i] = { mapID = 1, x = i / 100, y = 0 }
+		end
+		return r
+	end
+
+	it("takes the next point not checked this loop, then says the loop is done", function()
+		local r, checked, hist = route(4), {}, {}
+		assert.equals(2, (L.objective(r, {}, checked, hist, 1, 0)))
+		checked[2], checked[3] = true, true
+		assert.equals(4, (L.objective(r, {}, checked, hist, 1, 0)))
+		checked[4], checked[1] = true, true
+		local i, why = L.objective(r, {}, checked, hist, 4, 0)
+		assert.is_nil(i)
+		assert.equals("loop done", why)
+		L.newLoop(r, checked, hist)
+		assert.is_nil(next(checked))
+	end)
+
+	it("passes over a point empty on its last three visits, and comes back to it after two loops", function()
+		local r, checked, hist = route(3), {}, {}
+		for t = 1, 3 do
+			L.recordVisit(hist, 2, false, t)
+		end
+		assert.is_true(L.isCold(hist, 2))
+		assert.equals(3, (L.objective(r, {}, checked, hist, 1, 0)))
+		-- only cold points left: the cold one, flagged
+		checked[1], checked[3] = true, true
+		local i, why = L.objective(r, {}, checked, hist, 3, 0)
+		assert.equals(2, i)
+		assert.equals("cold", why)
+		L.newLoop(r, checked, hist)
+		L.newLoop(r, checked, hist)
+		assert.is_false(L.isCold(hist, 2))
+		L.recordVisit(hist, 2, true, 10)
+		assert.is_false(L.isCold(hist, 2))
+		assert.same({ 1, 4 }, { L.seenRate(hist, 2) })
+	end)
+
+	it("skips points on a respawn timer", function()
+		local r = route(3)
+		assert.equals(3, (L.objective(r, { [2] = 100 }, {}, {}, 1, 50)))
+	end)
+
+	it("matches chests by object id when the route lists them, else any locked object", function()
+		local battered = { objects = L.SEED_OBJECTS["Angor Battered"] }
+		assert.is_true(L.matchesRoute(battered, 179490, 150))
+		assert.is_false(L.matchesRoute(battered, 179492, 175))
+		assert.is_true(L.matchesRoute({}, 1, 150))
+		assert.is_false(L.matchesRoute({}, 1, nil))
+	end)
+
+	it("finds the nearest point within range", function()
+		local pts = { { i = 1, x = 0, y = 0 }, { i = 2, x = 10, y = 0 }, { i = 3, x = 50, y = 0 } }
+		assert.equals(2, (L.nearestIndex(pts, 8, 0, 20)))
+		assert.is_nil(L.nearestIndex(pts, 30, 0, 15))
+	end)
+end)

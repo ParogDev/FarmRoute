@@ -12,6 +12,8 @@
 
 Logic.lua
 Nav.lua
+Detect.lua
+HUD.lua
 MapLines.lua
 Import.lua
 Core.lua

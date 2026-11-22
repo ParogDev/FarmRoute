@@ -5,4 +5,7 @@
 	<Binding name="FARMROUTE_PREV">
 		FarmRoute.Prev()
 	</Binding>
+	<Binding name="FARMROUTE_SKIP">
+		FarmRoute.Skip()
+	</Binding>
 </Bindings>

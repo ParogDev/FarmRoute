@@ -51,18 +51,162 @@ describe("FarmRoute core", function()
 		mock.pos = { p.x + 1 / mock.YARDS, p.y } -- 1 yard away
 		mock.gameTime = mock.gameTime + 5
 		mock.tick()
+		assert.equals(1, ns.currentIndex()) -- settling: the soft target may still appear
+		mock.gameTime = mock.gameTime + 1
+		mock.tick()
 		assert.equals(2, ns.currentIndex())
 		assert.equals(14, #route.points)
 		assert.near(route.points[2].x, mock.waypoint.position.x, 1e-9)
+		-- nothing detected at point 1: an empty visit in its history, and it is checked for this loop
+		assert.is_false(FarmRouteDB.history["Angor Battered"][1].visits[1].seen)
+		assert.is_true(FarmRouteDB.checked["Angor Battered"][1])
 		-- within MIN_GAP nothing more happens even when standing on the next point
 		mock.pos = { route.points[2].x, route.points[2].y }
 		mock.tick()
+		mock.tick()
 		assert.equals(2, ns.currentIndex())
+		-- from the last point, the objective wraps past point 1 (already checked this loop) to 2
 		SlashCmdList.FARMROUTE("goto 14")
 		mock.pos = { route.points[14].x, route.points[14].y }
 		mock.gameTime = mock.gameTime + 5
 		mock.tick()
+		mock.gameTime = mock.gameTime + 1
+		mock.tick()
+		assert.equals(2, ns.currentIndex())
+	end)
+
+	local function footlocker(id, need)
+		return {
+			guid = "GameObject-0-1-0-12-" .. id .. "-0000" .. need,
+			name = id == 179490 and "Battered Footlocker" or "Dented Footlocker",
+			tooltip = { "Footlocker", "Requires Lockpicking (" .. need .. ")" },
+		}
+	end
+
+	it("a detected chest of the route becomes the objective, and its loot records a visit with a chest", function()
+		mock.login(nil)
+		local route = ns.activeRoute()
+		local p7 = route.points[7]
+		mock.pos = { p7.x + 6 / mock.YARDS, p7.y } -- 6 yd from point 7, far from point 1
+		mock.soft = footlocker(179490, 150)
+		mock.gameTime = mock.gameTime + 5
+		mock.tick()
+		assert.equals(7, ns.currentIndex())
+		assert.near(p7.x, mock.waypoint.position.x, 1e-9)
+		assert.equals("detected", ns.markerInfo().state)
+		assert.equals(150, ns.markerInfo().need)
+		assert.equals(169, ns.markerInfo().skill)
+		assert.equals(150, FarmRouteDB.objectNeed[179490])
+		-- standing at it with the chest still there: no advance
+		mock.pos = { p7.x, p7.y }
+		mock.gameTime = mock.gameTime + 5
+		mock.tick()
+		assert.equals(7, ns.currentIndex())
+		-- the target flips to a chair and back: no loot, no advance
+		mock.soft = { guid = "GameObject-0-1-0-12-61088-00001", name = "Wooden Chair", tooltip = {} }
+		mock.tick()
+		mock.gameTime = mock.gameTime + 2
+		mock.tick()
+		assert.equals(7, ns.currentIndex())
+		mock.soft = footlocker(179490, 150)
+		mock.tick()
+		-- opened (LOOT_OPENED), then gone: after LOST_AFTER the point is checked with a chest
+		mock.fire("LOOT_OPENED")
+		mock.soft = nil
+		mock.tick()
+		mock.gameTime = mock.gameTime + 2
+		mock.tick()
+		assert.is_true(FarmRouteDB.history["Angor Battered"][7].visits[1].seen)
+		assert.equals(8, ns.currentIndex())
+		assert.equals(1, ns.counters.advanceLooted)
+		assert.equals(1, ns.counters.chestJump)
+		assert.is_nil(ns.selftest.lastError)
+	end)
+
+	it("reads the minimum skill from the mouseover tooltip when the soft target's tooltip is empty", function()
+		mock.login(nil)
+		local p7 = ns.activeRoute().points[7]
+		mock.pos = { p7.x + 6 / mock.YARDS, p7.y }
+		mock.soft = footlocker(179490, 150)
+		mock.soft.tooltip = {} -- as in game
+		mock.tick()
+		assert.is_nil(ns.markerInfo().need)
+		ns.Detect.onObjectTooltip(nil, {
+			lines = { { leftText = "Battered Footlocker" }, { leftText = "Requires Lockpicking (150)" } },
+		})
+		assert.equals(150, FarmRouteDB.objectNeed[179490])
+		assert.equals(150, ns.markerInfo().need)
+		assert.equals("hooked", ns.Detect.status.tooltipHook)
+	end)
+
+	it("ignores chests of another route's kind and chests with no point in range", function()
+		mock.login(nil)
+		local p7 = ns.activeRoute().points[7]
+		mock.pos = { p7.x, p7.y }
+		mock.soft = footlocker(179492, 175) -- Dented: the downstairs route
+		mock.tick()
 		assert.equals(1, ns.currentIndex())
+		mock.soft = footlocker(179490, 150)
+		mock.pos = { 0.9, 0.9 }
+		mock.tick()
+		assert.equals(1, ns.currentIndex())
+		assert.equals(1, ns.counters.chestNoPoint)
+	end)
+
+	it("Skip checks the point without a history entry and flashes", function()
+		mock.login(nil)
+		local flashed
+		ns.HUD.flash = function(t)
+			flashed = t
+		end
+		FarmRoute.Skip()
+		assert.equals(2, ns.currentIndex())
+		assert.equals("Skipped 1/14", flashed)
+		assert.is_nil(FarmRouteDB.history["Angor Battered"][1])
+		assert.is_true(FarmRouteDB.checked["Angor Battered"][1])
+	end)
+
+	it("autoskip moves on after standing near a point with nothing detected (off by default)", function()
+		mock.login(nil)
+		local p1 = ns.activeRoute().points[1]
+		mock.pos = { p1.x + 15 / mock.YARDS, p1.y } -- near, outside the radius
+		mock.gameTime = mock.gameTime + 5
+		for _ = 1, 3 do
+			mock.gameTime = mock.gameTime + 10
+			mock.tick()
+		end
+		assert.equals(1, ns.currentIndex())
+		SlashCmdList.FARMROUTE("autoskip on")
+		for _ = 1, 3 do
+			mock.gameTime = mock.gameTime + 10
+			mock.tick()
+		end
+		assert.equals(2, ns.currentIndex())
+		assert.equals(1, ns.counters.autoSkip)
+	end)
+
+	it("health names what blocks detection, Fix repairs it, /fr off puts the player's values back", function()
+		mock.login(nil)
+		SlashCmdList.FARMROUTE("keepinteract off")
+		mock.cvars.SoftTargetInteractRange = "10"
+		local h = ns.healthState()
+		assert.is_false(h.ok)
+		assert.matches("only 10 yd", h.line)
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		h = ns.healthState()
+		assert.matches("gamepad only", h.line)
+		assert.matches("turned off by Plater", h.detail)
+		mock.combat = true
+		assert.is_false(ns.fixDetection())
+		mock.combat = false
+		assert.is_true(ns.fixDetection())
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.equals("20", mock.cvars.SoftTargetInteractRange)
+		assert.is_true(ns.healthState().ok)
+		SlashCmdList.FARMROUTE("off")
+		assert.equals("1", mock.cvars.SoftTargetInteract)
+		assert.equals("10", mock.cvars.SoftTargetInteractRange)
 	end)
 
 	it("does not advance when far or when the position is secret", function()
@@ -93,8 +237,40 @@ describe("FarmRoute core", function()
 		assert.is_false(ns.Nav.marker.shown)
 	end)
 
+	it("keepinteract puts the key back, and stops when another addon fights it", function()
+		mock.login(nil)
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.matches("put back to 3 %(was 1, set by Plater%)", table.concat(mock.chat, "\n"))
+		for _ = 1, 5 do
+			C_CVar.SetCVar("SoftTargetInteract", 1)
+		end
+		assert.equals("1", mock.cvars.SoftTargetInteract)
+		assert.matches("keeps changing the interact key", table.concat(mock.chat, "\n"))
+	end)
+
+	it("keepinteract leaves the player's own change alone and retries after combat", function()
+		mock.login(nil)
+		-- Options > Controls: no Lua caller
+		mock.cvars.SoftTargetInteract = "0"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "0")
+		assert.equals("0", mock.cvars.SoftTargetInteract)
+		mock.cvars.SoftTargetInteract = "3"
+		-- an addon in combat: put back once combat ends
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		mock.combat = true
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.equals("1", mock.cvars.SoftTargetInteract)
+		mock.combat = false
+		mock.fire("PLAYER_REGEN_ENABLED")
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.equals("FarmRoute (keepinteract)", FarmRouteDB.interactLog[#FarmRouteDB.interactLog].by)
+	end)
+
 	it("warns when the interact key is off and names who turned it off", function()
 		mock.login(nil)
+		SlashCmdList.FARMROUTE("keepinteract off")
 		C_CVar.SetCVar("SoftTargetInteract", 0) -- the mock stack says Lueur
 		assert.equals("Lueur", FarmRouteDB.interactLog[1].by)
 		assert.matches("Interact key is off.*turned off by Lueur", mock.chat[#mock.chat])
@@ -113,6 +289,7 @@ describe("FarmRoute core", function()
 
 	it("counts gamepad-only (1) as off, as Plater set it in game", function()
 		mock.login(nil)
+		SlashCmdList.FARMROUTE("keepinteract off")
 		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
 		C_CVar.SetCVar("SoftTargetInteract", 1)
 		assert.is_false(ns.interactState().ok)
@@ -180,5 +357,57 @@ describe("FarmRoute core", function()
 		assert.equals(0, opts.cleardistance)
 		assert.is_false(opts.persistent)
 		assert.equals("tomtom", ns.Nav.state.mode)
+	end)
+
+	it("probe logs a footlocker appearing and going, with the nearest point and the skill it needs", function()
+		mock.login(nil)
+		local p = ns.activeRoute().points[7]
+		mock.pos = { p.x + 10 / mock.YARDS, p.y }
+		mock.soft = {
+			guid = "GameObject-0-1-0-12-179490-00001",
+			name = "Battered Footlocker",
+			tooltip = { "Battered Footlocker", "Requires Lockpicking (150)" },
+			plate = true,
+		}
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		assert.is_nil(ns.selftest.lastError)
+		local ev = FarmRouteDB.probe.events[1]
+		assert.equals("seen", ev.kind)
+		assert.equals(179490, ev.objectID)
+		assert.equals(150, ev.need)
+		assert.equals("Angor Battered 7", ev.point)
+		assert.near(10, ev.pointYd, 0.1)
+		assert.equals(30, ev.z)
+		assert.matches("Battered Footlocker %(179490%), needs Lockpicking 150", table.concat(mock.chat, "\n"))
+		mock.soft = nil
+		mock.tick()
+		assert.equals("gone", FarmRouteDB.probe.events[2].kind)
+		local st = ns.selftest.snapshot("t").detect
+		assert.equals(1, st.objects["179490"].seen)
+		assert.equals(169, st.lockpicking)
+		assert.equals("3", st.cvars.SoftTargetInteract)
+		assert.is_nil(ns.selftest.lastError)
+	end)
+
+	it("probe chat names only chests of the active route; chairs stay in the log", function()
+		mock.login(nil)
+		mock.soft = { guid = "GameObject-0-1-0-12-61088-00001", name = "Wooden Chair", tooltip = {} }
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		assert.is_nil(table.concat(mock.chat, "\n"):find("Wooden Chair"))
+		assert.equals(61088, FarmRouteDB.probe.events[1].objectID)
+	end)
+
+	it("probe keeps secret soft-interact values out of the saved log", function()
+		mock.login(nil)
+		local guid = "GameObject-0-1-0-12-179490-00001"
+		mock.secret[guid] = true
+		mock.secret["Battered Footlocker"] = true
+		mock.soft = { guid = guid, name = "Battered Footlocker", tooltip = { "Battered Footlocker" } }
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		for _, ev in ipairs(FarmRouteDB.probe.events) do
+			assert.is_nil(ev.objectID)
+			assert.is_nil(ev.name)
+		end
+		assert.is_true(ns.Detect.status.secret > 0)
 	end)
 end)
