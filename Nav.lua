@@ -173,6 +173,14 @@ function Nav.clear()
 	setState({ ok = false, why = "stopped" })
 end
 
+-- A value safe to keep in SavedVariables: secrets become a note.
+local function plain(v)
+	if v ~= nil and issecretvalue(v) then
+		return "secret"
+	end
+	return v
+end
+
 function Nav.selftest()
 	local navFrame = C_Navigation.GetFrame()
 	return {
@@ -183,15 +191,23 @@ function Nav.selftest()
 		superTrackingUserWaypoint = C_SuperTrack.IsSuperTrackingUserWaypoint(),
 		navFrame = navFrame ~= nil,
 		navOnScreen = navFrame ~= nil and C_Navigation.HasValidScreenPosition() or false,
+		navClamped = navFrame ~= nil and C_Navigation.WasClampedToScreen() or false,
+		navDistance = navFrame ~= nil and plain(C_Navigation.GetDistance()) or nil,
+		marker = Nav.marker,
 		tomtom = (TomTom and TomTom.AddWaypoint) and "loaded" or "absent",
 	}
 end
 
 -- ---------------------------------------------------------------------------------------------------------
--- On-screen line: bottom centre of the screen to the in-world pin. Blizzard projects only the super-tracked
--- target to the screen, so this is the one line that can follow the world.
+-- In-world marker and on-screen line. On Forever the engine tracks the super-tracked waypoint and hands out
+-- its screen anchor (C_Navigation.GetFrame), but Blizzard's SuperTrackedFrame draws nothing, so the addon
+-- draws its own marker on that anchor: an icon above the point (never over the chest itself) with the yards
+-- readout, faded when you are close. The line runs from the bottom centre of the screen to the marker.
 -- ---------------------------------------------------------------------------------------------------------
-local lineFrame, line, anchoredTo
+local MARKER_LIFT = 36 -- pixels above the point
+local lineFrame, line, marker, anchoredTo
+
+Nav.marker = { shown = false, why = "not built yet" }
 
 function Nav.initScreenLine()
 	lineFrame = CreateFrame("Frame", nil, UIParent)
@@ -203,28 +219,73 @@ function Nav.initScreenLine()
 	line:SetColorTexture(1, 0.82, 0, 0.55)
 	line:SetStartPoint("BOTTOM", UIParent, 0, 80)
 	lineFrame:Hide()
+
+	marker = CreateFrame("Frame", nil, UIParent)
+	marker:SetSize(22, 22)
+	marker:SetFrameStrata("LOW")
+	marker:EnableMouse(false)
+	marker.icon = marker:CreateTexture(nil, "ARTWORK")
+	marker.icon:SetAllPoints(marker)
+	if not pcall(marker.icon.SetAtlas, marker.icon, "Navigation-Tracked-Icon") then
+		marker.icon:SetColorTexture(1, 0.82, 0, 1)
+	end
+	marker.text = marker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	marker.text:SetPoint("BOTTOM", marker, "TOP", 0, 2)
+	marker:Hide()
+	Nav.marker.why = "built"
 end
 
--- Called from the ticker: shows the line only when the pin is ours and on screen.
-function Nav.updateScreenLine(enabled)
+local function hideAll(why)
+	lineFrame:Hide()
+	marker:Hide()
+	Nav.marker.shown, Nav.marker.why = false, why
+end
+
+function Nav.hideMarker(why)
+	if lineFrame then
+		hideAll(why or "stopped")
+	end
+end
+
+-- Called from the ticker. lineEnabled: the /fr line setting; radius: the arrival radius (fade inside 1.5x).
+function Nav.updateScreenLine(lineEnabled, radius)
 	if not lineFrame then
 		return
 	end
 	local navFrame = C_Navigation.GetFrame()
-	local show = enabled
-		and navFrame ~= nil
-		and Nav.state.mode == "pin"
-		and C_SuperTrack.IsSuperTrackingUserWaypoint()
-		and Nav.ownsPin()
-		and C_Navigation.HasValidScreenPosition()
-		and not C_Navigation.WasClampedToScreen()
-	if show then
-		if anchoredTo ~= navFrame then
-			line:SetEndPoint("CENTER", navFrame, 0, 0)
-			anchoredTo = navFrame
-		end
+	if Nav.state.mode ~= "pin" or not Nav.state.ok then
+		return hideAll("not in pin mode or nothing placed")
+	end
+	if not navFrame then
+		return hideAll("C_Navigation.GetFrame() is nil")
+	end
+	if not (C_SuperTrack.IsSuperTrackingUserWaypoint() and Nav.ownsPin()) then
+		return hideAll("our waypoint is not super-tracked")
+	end
+	if not C_Navigation.HasValidScreenPosition() then
+		return hideAll("no valid screen position")
+	end
+	if anchoredTo ~= navFrame then
+		marker:ClearAllPoints()
+		marker:SetPoint("BOTTOM", navFrame, "CENTER", 0, MARKER_LIFT)
+		line:SetEndPoint("CENTER", marker, 0, 0)
+		anchoredTo = navFrame
+	end
+	local clamped = C_Navigation.WasClampedToScreen()
+	local d = C_Navigation.GetDistance()
+	if d and not issecretvalue(d) then
+		marker.text:SetText(string.format("%d yd", d + 0.5))
+	else
+		marker.text:SetText("")
+		d = nil
+	end
+	local near = d and radius and d <= radius * 1.5
+	marker:SetAlpha(near and 0.45 or (clamped and 0.7 or 1))
+	marker:Show()
+	if lineEnabled and not clamped and not near then
 		lineFrame:Show()
 	else
 		lineFrame:Hide()
 	end
+	Nav.marker.shown, Nav.marker.why, Nav.marker.clamped = true, "shown", clamped
 end

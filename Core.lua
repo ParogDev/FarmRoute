@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.1"
+ns.VERSION = "0.1.2"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -171,10 +171,10 @@ end
 
 local function tick()
 	if not running then
-		Nav.updateScreenLine(false)
+		Nav.hideMarker("stopped")
 		return
 	end
-	Nav.updateScreenLine(ns.db.settings.screenLine)
+	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius)
 	local route, i = ns.activeRoute(), ns.currentIndex()
 	if not route or not i then
 		return
@@ -200,7 +200,7 @@ function ns.stop()
 	running = false
 	ns.db.running = false
 	Nav.clear()
-	Nav.updateScreenLine(false)
+	Nav.hideMarker("stopped")
 	MapLines.refresh()
 end
 

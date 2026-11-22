@@ -51,6 +51,8 @@ function M.install()
 	M.now, M.gameTime = 1000000, 500
 	M.mapID, M.pos = 1418, { 0.5, 0.5 }
 	M.waypoint, M.superTracked = nil, false
+	M.navFrame, M.navDistance = nil, nil
+	M.widget = widget
 	_G.CreateFrame = function()
 		local f = widget({ _events = {} })
 		function f:RegisterEvent(e)
@@ -136,10 +138,13 @@ function M.install()
 	}
 	_G.C_Navigation = {
 		GetFrame = function()
-			return nil
+			return M.navFrame
 		end,
 		HasValidScreenPosition = function()
-			return false
+			return M.navFrame ~= nil
+		end,
+		GetDistance = function()
+			return M.navDistance or 0
 		end,
 		WasClampedToScreen = function()
 			return false

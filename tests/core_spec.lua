@@ -78,6 +78,20 @@ describe("FarmRoute core", function()
 		assert.matches("secret", FarmRouteDB.selftest and ns.selftest.snapshot("t").distanceWhy)
 	end)
 
+	it("draws its own marker on the navigation frame, and names why when it can't", function()
+		mock.login(nil)
+		mock.tick()
+		assert.equals("C_Navigation.GetFrame() is nil", ns.Nav.marker.why)
+		mock.navFrame, mock.navDistance = mock.widget(), 17.4
+		mock.tick()
+		assert.is_true(ns.Nav.marker.shown)
+		local st = ns.selftest.snapshot("t").nav
+		assert.equals(17.4, st.navDistance)
+		SlashCmdList.FARMROUTE("off")
+		mock.tick()
+		assert.is_false(ns.Nav.marker.shown)
+	end)
+
 	it("keybind functions move both ways", function()
 		mock.login(nil)
 		FarmRoute.Prev()
