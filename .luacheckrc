@@ -23,6 +23,7 @@ else
 		"WOW_PROJECT_ID", "issecretvalue", "date", "time", "GetTime", "hooksecurefunc", "tinsert",
 		"C_CVar", "debugstack", "InCombatLockdown", "UnitIsGameObject", "UnitExists", "UnitGUID", "UnitName",
 		"C_NamePlate", "C_TooltipInfo", "UnitPosition", "GetPlayerFacing", "C_VignetteInfo", "C_SkillInfo",
+		"GetLootSourceInfo", "GetNumLootItems",
 	}
 end
 -- FrameXML globals the generated list doesn't carry (it is built from the C API lists).

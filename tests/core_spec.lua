@@ -410,4 +410,77 @@ describe("FarmRoute core", function()
 		end
 		assert.is_true(ns.Detect.status.secret > 0)
 	end)
+
+	it("learns chest spawns from loot: confirms a seed, then adds a new point and moves the history", function()
+		mock.login(nil)
+		local route = ns.activeRoute()
+		local p1 = route.points[1]
+		-- a Battered Footlocker looted 9 yd east of seed 1
+		mock.pos = { p1.x + 9 / mock.YARDS, p1.y }
+		mock.loot = { "GameObject-0-1-2-3-179490-0000" }
+		mock.fire("LOOT_OPENED")
+		assert.equals("confirm", FarmRouteDB.finds[1].action)
+		assert.equals(1, route.points[1].finds)
+		assert.near(mock.pos[1], route.points[1].x, 1e-9)
+		-- far from every point: a new spawn; history keyed by index follows the insert
+		FarmRouteDB.history["Angor Battered"] = { [14] = { visits = { { t = 1, seen = true } } } }
+		mock.pos = { 0.30, 0.30 }
+		mock.fire("LOOT_OPENED")
+		assert.equals("new", FarmRouteDB.finds[2].action)
+		assert.equals(15, #route.points)
+		local at = FarmRouteDB.finds[2].point
+		assert.equals(1, route.points[at].finds)
+		local moved = at <= 14 and 15 or 14
+		assert.is_not_nil(FarmRouteDB.history["Angor Battered"][moved])
+		-- a Dented loot doesn't touch the Battered route
+		mock.loot = { "GameObject-0-1-2-3-179492-0000" }
+		mock.fire("LOOT_OPENED")
+		assert.equals("Angor Dented", FarmRouteDB.finds[3].route)
+		assert.equals(15, #route.points)
+		assert.is_nil(FarmRouteDB.selftest.lastError)
+	end)
+
+	it("/fr learn records a walk and accept saves path points the pin goes through", function()
+		mock.login(nil)
+		SlashCmdList.FARMROUTE("new Test")
+		local Y = mock.YARDS
+		local function at(x, y)
+			mock.pos = { 0.5 + x / Y, 0.5 + y / Y }
+		end
+		at(0, 0)
+		SlashCmdList.FARMROUTE("add A")
+		at(30, 30)
+		SlashCmdList.FARMROUTE("add B")
+		SlashCmdList.FARMROUTE("learn on")
+		for x = 0, 30, 3 do
+			at(x, 0)
+			mock.tick()
+		end
+		for y = 3, 30, 3 do
+			at(30, y)
+			mock.tick()
+		end
+		SlashCmdList.FARMROUTE("learn off")
+		assert.equals(1, #FarmRouteDB.learn.Test.plan.suggestions)
+		assert.equals(1, #ns.learnView().suggestions)
+		SlashCmdList.FARMROUTE("learn accept")
+		local route = ns.activeRoute()
+		assert.equals(3, #route.points)
+		assert.equals("path", route.points[2].kind)
+		assert.is_nil(FarmRouteDB.learn.Test)
+		-- from A the pin goes to the via first, the objective stays B
+		SlashCmdList.FARMROUTE("goto 1")
+		at(0, 0)
+		mock.gameTime = mock.gameTime + 5
+		mock.tick()
+		mock.gameTime = mock.gameTime + 1
+		mock.tick()
+		assert.equals(3, ns.currentIndex())
+		assert.equals(2, ns.pinIndex())
+		assert.equals("path", ns.markerInfo().state)
+		at(30, 1)
+		mock.tick()
+		assert.equals(3, ns.pinIndex())
+		assert.is_nil(FarmRouteDB.selftest.lastError)
+	end)
 end)

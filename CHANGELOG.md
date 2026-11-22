@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Chest spawns are learned from the chests you loot (the loot window names the chest kind). A loot within 4 yd of a learned point moves it to the average of its finds. A loot within 15 yd of a seed point confirms it at the loot spot. Anywhere else it adds a new point where the loop grows least. `/fr list` shows "learned xN", "unconfirmed" or "dropped".
+- Once a route has learned points, a seed point that no loot has confirmed and that was empty on its last 6 visits drops out of the loop. It comes back if a loot lands near it.
+- Path points: via-points with no chest. The pin goes through them on the way to the next chest and moves on once you reach or pass each one. The marker shows them as a small ring.
+- `/fr learn on` records your walk, a sample every 3 yd. `/fr learn off` suggests path points between the chests you passed and shows them with the trail on the world map. `/fr learn accept` saves them in walking order. `/fr learn discard` drops them.
+- World map: chests are diamonds, unconfirmed seeds hollow, path points small squares, dropped seeds faint specks outside the loop.
+
 ## 0.2.4
 
 - A chest counts as looted only when the loot window opens for it. A chair taking the soft target no longer moves the route on.

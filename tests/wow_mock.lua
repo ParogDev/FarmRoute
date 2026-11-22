@@ -95,6 +95,13 @@ function M.install()
 		return v ~= nil and M.secret[v] == true
 	end
 	_G.CreateVector2D = vec
+	M.loot = {} -- source GUIDs of the open loot window, one per slot
+	_G.GetNumLootItems = function()
+		return #M.loot
+	end
+	_G.GetLootSourceInfo = function(slot)
+		return M.loot[slot], 1
+	end
 	_G.UiMapPoint = {
 		CreateFromCoordinates = function(m, x, y)
 			return { uiMapID = m, position = vec(x, y) }
@@ -109,6 +116,9 @@ function M.install()
 		end,
 		GetWorldPosFromMapPos = function(_, v)
 			return 0, vec(v.x * M.YARDS, v.y * M.YARDS)
+		end,
+		GetMapPosFromWorldPos = function(_, v)
+			return 1418, vec(v.x / M.YARDS, v.y / M.YARDS)
 		end,
 		CanSetUserWaypointOnMap = function()
 			return true

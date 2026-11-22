@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.2.4"
+ns.VERSION = "0.3.0"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -62,6 +62,8 @@ function ns.initDB(saved)
 	db.history = db.history or {} -- [route][point] = { visits = { { t, seen } }, lastSeen, rested }
 	db.checked = db.checked or {} -- [route][point] = true: checked this loop
 	db.objectNeed = db.objectNeed or {} -- [objectID] = minimum skill, read from the tooltip
+	db.finds = db.finds or {} -- the last looted chests and what they did to the route
+	db.learn = db.learn or {} -- [route] = { recording, samples = { { mapID, x, y, wx, wy, c } }, plan }
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then
 			db.settings[k] = v
@@ -112,7 +114,11 @@ function ns.currentIndex()
 	end
 	local i = ns.db.current[route.name]
 	if not i or not route.points[i] then
-		return #route.points > 0 and 1 or nil
+		i = #route.points > 0 and 1 or nil
+	end
+	-- the objective is a chest: a path point stored there (an edited route) moves on to the next chest
+	if i and L.isPath(route.points[i]) then
+		return L.nextIndex(route, {}, i, 1, 0) or i
 	end
 	return i
 end
@@ -147,8 +153,21 @@ local function say(line)
 end
 ns.say = say
 
+-- Path points between the last chest and the objective, walked in order: { route, list = { i }, at }
+local via = { list = {}, at = 1 }
+
+-- The point the pin is on: the next via of the stretch being walked, else the objective chest.
+function ns.pinIndex()
+	local route = ns.activeRoute()
+	local i = via.route == (route and route.name) and via.list[via.at] or nil
+	if i and route.points[i] then
+		return i
+	end
+	return ns.currentIndex()
+end
+
 local function place()
-	local route, i = ns.activeRoute(), ns.currentIndex()
+	local route, i = ns.activeRoute(), ns.pinIndex()
 	if not running or not route or not i then
 		return
 	end
@@ -171,17 +190,48 @@ local function resetPointState()
 end
 
 -- Every move of the objective starts the point's settle and skip clocks again; a route switch also forgets
--- the chest and the points seen this loop, which belong to the other route.
-local function setCurrent(i)
+-- the chest and the points seen this loop, which belong to the other route. from: the chest the walk comes
+-- from, so the pin goes through the path points in between (nil: straight to i).
+local function setCurrent(i, from)
 	local route = ns.activeRoute()
+	if not i then
+		return
+	end
 	if seenRoute and seenRoute ~= route.name then
 		seenThisLoop, chest = {}, nil
 	end
 	seenRoute = route.name
 	resetPointState()
 	ns.db.current[route.name] = i
+	via = { route = route.name, list = L.viasBetween(route, from, i), at = 1 }
 	lastAdvance = GetTime()
 	place()
+end
+
+-- Moves the pin past the vias the player has reached (or walked past); places it when it moved.
+local function viaTick(route, i)
+	if via.route ~= route.name or not via.list[via.at] then
+		return
+	end
+	local c, x, y = Nav.playerWorld()
+	local tc, tx, ty = Nav.worldPos(route.points[i].mapID, route.points[i].x, route.points[i].y)
+	if not c or tc ~= c then
+		return
+	end
+	local d, vt = {}, {}
+	for k = via.at, #via.list do
+		local p = route.points[via.list[k]]
+		local vc, vx, vy = Nav.worldPos(p.mapID, p.x, p.y)
+		if vc ~= c then
+			break
+		end
+		d[k], vt[k] = L.distance(x, y, vx, vy), L.distance(vx, vy, tx, ty)
+	end
+	local at = L.nextVia(via.at, d, L.distance(x, y, tx, ty), vt, ns.db.settings.radius)
+	if at ~= via.at then
+		via.at = at
+		place()
+	end
 end
 
 function ns.historyFor(name)
@@ -212,7 +262,7 @@ function ns.advance(dir, why, seen)
 		chest = nil
 	end
 	if dir < 0 then
-		setCurrent((L.nextIndex(route, timers, cur, -1, now)))
+		setCurrent((L.nextIndex(route, timers, cur, -1, now, ns.historyFor(route.name))))
 		return
 	end
 	local m = L.respawnOf(route, cur)
@@ -233,11 +283,11 @@ function ns.advance(dir, why, seen)
 	end
 	local waiting = false
 	if not i then
-		i, waiting = L.nextIndex(route, timers, cur, 1, now)
+		i, waiting = L.nextIndex(route, timers, cur, 1, now, hist)
 	end
 	ns.objectiveWhy = waiting and "waiting" or objWhy
-	setCurrent(i)
-	if waiting then
+	setCurrent(i, cur)
+	if waiting and i and timers[i] then
 		say(
 			string.format(
 				"every point is on its respawn timer; next up: %s in %d s",
@@ -328,11 +378,134 @@ local function nearestPoint(route)
 	return L.nearestIndex(list, x, y, detectYards())
 end
 
--- LOOT_OPENED while a chest of the route is the target, or was a moment ago: it is being opened.
+-- ---------------------------------------------------------------------------------------------------------
+-- Learned spawns: every looted chest of a route's kind is a find at the player's position (inside loot
+-- range of the chest). Logic.findTarget merges it into a confirmed point, confirms the nearest seed, or adds
+-- a point. Point indexes key the history, checked set and timers, so an insert moves those along.
+-- ---------------------------------------------------------------------------------------------------------
+local FINDS_MAX = 40
+
+-- { { i, x, y } } in world yards for every point of the route on continent c.
+local function routeYards(route, c)
+	local list = {}
+	for i, p in ipairs(route.points) do
+		local pc, wx, wy = Nav.worldPos(p.mapID, p.x, p.y)
+		if pc == c then
+			list[#list + 1] = { i = i, x = wx, y = wy, point = p }
+		end
+	end
+	return list
+end
+
+-- The map position (on the route's own map) of a world point: mapID, x, y.
+local function onRouteMap(route, c, wx, wy, pm, px, py)
+	local rm = route.points[1] and route.points[1].mapID or pm
+	if rm == pm then
+		return pm, px, py
+	end
+	local x, y = Nav.mapPos(rm, c, wx, wy)
+	if x then
+		return rm, x, y
+	end
+	return pm, px, py
+end
+
+-- Applies an old -> new index map to everything keyed by the route's point indexes.
+function ns.remapRoute(name, map)
+	local db = ns.db
+	db.history[name] = L.remap(db.history[name], map)
+	db.checked[name] = L.remap(db.checked[name], map)
+	db.timers[name] = L.remap(db.timers[name], map)
+	if db.current[name] then
+		db.current[name] = map[db.current[name]] or 1
+	end
+	if seenRoute == name then
+		seenThisLoop = L.remap(seenThisLoop, map)
+		if chest then
+			chest.point = map[chest.point]
+		end
+	end
+	if via.route == name then
+		via = { list = {}, at = 1 }
+	end
+end
+
+-- The game object id of what the open loot window came from (first slot with a GameObject source), or nil
+-- and why.
+local function lootObject()
+	local n = GetNumLootItems and GetNumLootItems() or 0
+	for slot = 1, n do
+		local ok, guid = pcall(GetLootSourceInfo, slot)
+		if ok and guid ~= nil then
+			if issecretvalue(guid) then
+				return nil, "loot source is a secret value"
+			end
+			local id = L.guidObject(guid)
+			if id then
+				return id
+			end
+		end
+	end
+	return nil, n == 0 and "loot window empty" or "loot not from a game object"
+end
+
+-- Records a find for every route that farms this object. Returns what was done, for the selftest.
+function ns.recordFind(objectID)
+	local c, wx, wy, pm, px, py = Nav.playerWorld()
+	if not c then
+		return { why = "no player position: " .. tostring(wx) }
+	end
+	local done
+	for name, route in pairs(ns.db.routes) do
+		if type(route.objects) == "table" and route.objects[objectID] then
+			local list = routeYards(route, c)
+			local action, i, d = L.findTarget(route, list, wx, wy)
+			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
+			if action == "new" then
+				local floor = route.points[1] and route.points[1].floor
+				local p = { mapID = mapID, x = mx, y = my, label = "Learned", floor = floor, finds = 1 }
+				ns.remapRoute(name, L.insertMap(#route.points, i))
+				table.insert(route.points, i, p)
+			else
+				L.mergeFind(route.points[i], mx, my)
+			end
+			done = { route = name, objectID = objectID, action = action, point = i, yd = d and math.floor(d + 0.5) }
+			done.at = date("%Y-%m-%d %H:%M:%S")
+			L.push(ns.db.finds, done, FINDS_MAX)
+			local what = action == "new" and "new spawn" or (action == "confirm" and "seed confirmed") or "spawn"
+			say(string.format("%s learned: %s", what, L.formatPoint(route, i)))
+			-- the looted chest is this point now: the loot logic and history follow it
+			if name == ns.db.active and chest then
+				if ns.db.current[name] == chest.point then
+					ns.db.current[name] = i
+				end
+				chest.point = i
+				seenThisLoop[i] = true
+			end
+		end
+	end
+	if ns.db.learn[ns.db.active or ""] and done then
+		local lr = ns.db.learn[ns.db.active]
+		if lr.recording then
+			lr.finds = lr.finds or {}
+			lr.finds[#lr.finds + 1] = #lr.samples
+		end
+	end
+	if done then
+		place()
+		MapLines.refresh()
+	end
+	return done or { objectID = objectID, why = "no route farms object " .. tostring(objectID) }
+end
+
+-- LOOT_OPENED while a chest of the route is the target, or was a moment ago: it is being opened. The loot
+-- source names the chest kind; a route's kind is a learned spawn.
 function ns.onLootOpened()
 	if chest and GetTime() - (chest.lastSeen or 0) <= LOST_AFTER * 2 then
 		chest.lootedAt = GetTime()
 	end
+	local id, why = lootObject()
+	ns.lastFind = id and ns.recordFind(id) or { why = why }
 end
 
 local function chestTick(route, cur)
@@ -427,13 +600,40 @@ function ns.markerInfo()
 	if not route or not i then
 		return {}
 	end
-	local state = "route"
+	local state, label = "route", i .. "/" .. #route.points
 	if chest and chest.point == i then
 		state = "detected"
 	elseif ns.objectiveWhy == "waiting" then
 		state = "waiting"
+	elseif ns.pinIndex() ~= i then
+		state, label = "path", "→ " .. label
 	end
-	return { state = state, need = ns.routeNeed(route), skill = ns.skillRank(), label = i .. "/" .. #route.points }
+	return { state = state, need = ns.routeNeed(route), skill = ns.skillRank(), label = label }
+end
+
+-- /fr learn: a sample every LEARN_STEP yards walked, kept on the route's map, plus the finds made meanwhile.
+local SAMPLES_MAX, LEARN_REDRAW = 2000, 1
+local lastLearnDraw = 0
+
+local function learnTick(route)
+	local lr = ns.db.learn[route.name]
+	if not lr or not lr.recording or #lr.samples >= SAMPLES_MAX then
+		return
+	end
+	local c, wx, wy, pm, px, py = Nav.playerWorld()
+	if not c then
+		return
+	end
+	local last = lr.samples[#lr.samples]
+	if not L.shouldSample(last and { x = last.wx, y = last.wy }, wx, wy, L.LEARN_STEP) then
+		return
+	end
+	local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
+	lr.samples[#lr.samples + 1] = { mapID = mapID, x = mx, y = my, wx = wx, wy = wy, c = c }
+	if GetTime() - lastLearnDraw >= LEARN_REDRAW then
+		lastLearnDraw = GetTime()
+		MapLines.refresh()
+	end
 end
 
 local function tick()
@@ -449,6 +649,8 @@ local function tick()
 	if route and i then
 		ns.guard("chest", chestTick, route, i)
 		i = ns.currentIndex()
+		ns.guard("via", viaTick, route, i)
+		ns.guard("learn", learnTick, route)
 	end
 	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius, ns.markerInfo())
 	if not route or not i then
@@ -542,6 +744,19 @@ function selftest.snapshot(phase)
 			end)() or 0,
 		},
 		health = ns.healthState(),
+		learned = route and (function()
+			local n, hist = { chest = 0, unconfirmed = 0, dropped = 0, path = 0 }, ns.historyFor(route.name)
+			for i = 1, #route.points do
+				local s = L.pointStatus(route, hist, i)
+				n[s] = n[s] + 1
+			end
+			n.lastFind = ns.lastFind
+			n.finds = #ns.db.finds
+			n.pin = ns.pinIndex()
+			local lr = ns.db.learn[route.name]
+			n.learn = lr and { recording = lr.recording, samples = #lr.samples } or nil
+			return n
+		end)() or nil,
 		lastError = selftest.lastError,
 	}
 	return ns.db.selftest
@@ -572,7 +787,127 @@ local HELP = {
 	"/fr probe [on|off] - what soft-interact has measured (chat line per change when on)",
 	"/fr follow on|off - a detected chest becomes the objective; /fr suggestskip | autoskip on|off - near a point with nothing detected",
 	"/fr restorecvars - put back your soft-target settings (also done by /fr off); Skip keybind: Options > Keybindings",
+	"/fr learn on|off|accept|discard - record your walk; off suggests path points (world map), accept saves them",
 }
+
+-- ---------------------------------------------------------------------------------------------------------
+-- /fr learn: record a walk, then suggest path points between the chests it passed (Logic.learnPlan)
+-- ---------------------------------------------------------------------------------------------------------
+local function learnInput(route, lr)
+	local c = lr.samples[1] and lr.samples[1].c
+	local samples, chests = {}, {}
+	for _, s in ipairs(lr.samples) do
+		if s.c == c then
+			samples[#samples + 1] = { x = s.wx, y = s.wy, mapID = s.mapID, mx = s.x, my = s.y }
+		end
+	end
+	local entries = c and routeYards(route, c) or {}
+	for _, e in ipairs(entries) do
+		if not L.isPath(e.point) then
+			chests[#chests + 1] = e
+		end
+	end
+	return samples, chests, entries
+end
+
+function ns.learnView()
+	local route = ns.activeRoute()
+	local lr = route and ns.db.learn[route.name]
+	if not lr then
+		return nil
+	end
+	local v = { recording = lr.recording, mapID = route.points[1] and route.points[1].mapID, samples = {} }
+	for _, s in ipairs(lr.samples) do
+		if s.mapID == v.mapID then
+			v.samples[#v.samples + 1] = { x = s.x, y = s.y }
+		end
+	end
+	if lr.plan then
+		v.suggestions, v.visits = {}, {}
+		for _, s in ipairs(lr.plan.suggestions) do
+			v.suggestions[#v.suggestions + 1] = { x = s.mx, y = s.my }
+		end
+		for _, i in ipairs(lr.plan.order) do
+			local p = route.points[i]
+			if p then
+				v.visits[#v.visits + 1] = { x = p.x, y = p.y }
+			end
+		end
+	end
+	return v
+end
+
+local function learnCommand(arg)
+	local route = ns.activeRoute()
+	if not route then
+		say("no active route")
+		return
+	end
+	local lr = ns.db.learn[route.name]
+	if arg == "on" then
+		ns.db.learn[route.name] = { recording = true, samples = {}, startedAt = date("%Y-%m-%d %H:%M:%S") }
+		say("learning " .. route.name .. ": walk the loop, loot as usual, then /fr learn off")
+	elseif arg == "off" then
+		if not lr or not lr.recording then
+			say("not recording: /fr learn on")
+			return
+		end
+		lr.recording = false
+		local samples, chests = learnInput(route, lr)
+		local plan = L.learnPlan(samples, chests)
+		plan.suggestions = {}
+		for k = 1, #plan.order do
+			for _, s in ipairs((k < #plan.order and plan.vias[k] or plan.closing) or {}) do
+				plan.suggestions[#plan.suggestions + 1] = s
+			end
+		end
+		lr.plan = plan
+		say(
+			string.format(
+				"%d samples, %d chests passed, %d path points suggested (world map). /fr learn accept or discard",
+				#samples,
+				#plan.order,
+				#plan.suggestions
+			)
+		)
+	elseif arg == "accept" then
+		if not lr or not lr.plan or #lr.plan.order == 0 then
+			say("nothing to accept: /fr learn on, walk, /fr learn off")
+			return
+		end
+		local _, _, entries = learnInput(route, lr)
+		local floor = route.points[1] and route.points[1].floor
+		local points, map = L.applyPlan(entries, lr.plan, function(s)
+			return { mapID = s.mapID, x = s.mx, y = s.my, kind = "path", label = "path", floor = floor }
+		end)
+		-- points on another continent than the walk stay, appended
+		local kept = {}
+		for _, e in ipairs(entries) do
+			kept[e.i] = true
+		end
+		for i, p in ipairs(route.points) do
+			if not kept[i] and not L.isPath(p) then
+				points[#points + 1] = p
+				map[i] = #points
+			end
+		end
+		ns.remapRoute(route.name, map)
+		route.points = points
+		ns.db.learn[route.name] = nil
+		say(string.format("route saved: %d points (%d path)", #points, #lr.plan.suggestions))
+		place()
+	elseif arg == "discard" then
+		ns.db.learn[route.name] = nil
+		say("learn walk discarded")
+	else
+		say(
+			lr and string.format("learn: %s, %d samples", lr.recording and "recording" or "stopped", #lr.samples)
+				or "/fr learn on|off|accept|discard"
+		)
+		return
+	end
+	MapLines.refresh()
+end
 
 local function onOff(v)
 	return v and "on" or "off"
@@ -610,7 +945,7 @@ local function toggle(key, arg, label)
 	MapLines.refresh()
 end
 
-local commands = {}
+local commands = { learn = learnCommand }
 
 function commands.on()
 	ns.start()
@@ -689,7 +1024,7 @@ function commands.add(arg)
 		say(route and ("no position: " .. tostring(x)) or "no active route")
 		return
 	end
-	route.points[#route.points + 1] = { mapID = m, x = x, y = y, label = arg ~= "" and arg or nil }
+	route.points[#route.points + 1] = { mapID = m, x = x, y = y, label = arg ~= "" and arg or nil, manual = true }
 	say("added " .. L.formatPoint(route, #route.points))
 	MapLines.refresh()
 end
@@ -722,7 +1057,10 @@ function commands.list()
 		local t = timers[i] and timers[i] > now and string.format(" [up in %d s]", timers[i] - now) or ""
 		local seen, visits = L.seenRate(hist, i)
 		local h = visits > 0 and string.format(" chest %d/%d visits", seen, visits) or ""
-		local flags = (checked[i] and " checked" or "") .. (L.isCold(hist, i) and " cold" or "")
+		local st = L.pointStatus(route, hist, i)
+		local flags = (checked[i] and " checked" or "")
+			.. (L.isCold(hist, i) and " cold" or "")
+			.. ((st == "unconfirmed" or st == "dropped") and (" " .. st) or "")
 		say((i == ns.currentIndex() and "> " or "  ") .. L.formatPoint(route, i) .. t .. h .. flags)
 	end
 end
@@ -1248,7 +1586,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		-- Blizzard clears a reached user waypoint in its own handler; move on after it has run.
 		if running and Nav.ownsPin() and ns.db.settings.autoAdvance then
 			C_Timer.After(0, function()
-				if GetTime() - lastAdvance >= MIN_GAP then
+				-- a reached via only moves the pin on; the chest is checked by the arrival logic
+				if ns.pinIndex() ~= ns.currentIndex() then
+					via.at = via.at + 1
+					guard("place", place)
+				elseif GetTime() - lastAdvance >= MIN_GAP then
 					guard("navReached", ns.advance, 1, "advanceNavReached")
 				end
 			end)
