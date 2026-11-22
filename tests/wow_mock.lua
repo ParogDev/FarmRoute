@@ -244,7 +244,7 @@ end
 -- Loads the addon files in .toc order with a shared namespace.
 function M.load()
 	local ns = {}
-	for _, f in ipairs({ "Logic.lua", "Nav.lua", "Detect.lua", "MapLines.lua", "Import.lua", "Core.lua" }) do
+	for _, f in ipairs({ "Logic.lua", "Nav.lua", "Detect.lua", "HUD.lua", "MapLines.lua", "Import.lua", "Core.lua" }) do
 		assert(loadfile(f))("FarmRoute", ns)
 	end
 	return ns
