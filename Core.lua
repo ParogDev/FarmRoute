@@ -419,7 +419,7 @@ local function onRouteMap(route, c, wx, wy, pm, px, py)
 	if x then
 		return rm, x, y
 	end
-	return pm, px, py
+	return nil, "no position on the route's map " .. tostring(rm)
 end
 
 -- Applies an old -> new index map to everything keyed by the route's point indexes.
@@ -505,7 +505,10 @@ function ns.recordFind(objectID)
 			local list = routeYards(route, c)
 			local action, i, d = L.findTarget(route, list, wx, wy)
 			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
-			if action == "far" then -- luacheck: ignore 542
+			if not mapID then
+				ns.mapWhy = mx -- a point on another map would vanish from the route's map: skipped
+				i = nil
+			elseif action == "far" then -- luacheck: ignore 542
 				-- the same chest kind somewhere else: not this route's
 			elseif action == "new" then
 				local floor = route.points[1] and route.points[1].floor
@@ -524,11 +527,19 @@ function ns.recordFind(objectID)
 				-- the looted chest is this point now: the loot logic and history follow it
 				if name == ns.db.active then
 					seenThisLoop[i] = true
+					local objective = ns.db.current[name]
+					local wasObjective = chest and objective == chest.point
 					if chest then
-						if ns.db.current[name] == chest.point then
-							ns.db.current[name] = i
-						end
 						chest.point = i
+					end
+					if wasObjective and objective ~= i then
+						-- the chest is here: no vias, fresh point clocks, the pin on it
+						local keep = chest
+						setCurrent(i)
+						chest = keep
+					elseif not wasObjective and objective ~= i then
+						-- another chest of the loop, looted on the way: don't send the player back to it
+						ns.checkedFor(name)[i] = true
 					end
 				end
 			end
@@ -681,6 +692,10 @@ local function learnTick(route)
 		return
 	end
 	local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
+	if not mapID then
+		lr.why = mx
+		return
+	end
 	lr.samples[#lr.samples + 1] = { mapID = mapID, x = mx, y = my, wx = wx, wy = wy, c = c }
 	if GetTime() - lastLearnDraw >= LEARN_REDRAW then
 		lastLearnDraw = GetTime()
