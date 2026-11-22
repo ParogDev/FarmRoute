@@ -37,6 +37,7 @@ function ns.initDB(saved)
 	db.current = db.current or {}
 	db.timers = db.timers or {}
 	db.settings = db.settings or {}
+	db.interactLog = db.interactLog or {}
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then
 			db.settings[k] = v
@@ -523,7 +524,8 @@ end
 -- ---------------------------------------------------------------------------------------------------------
 -- Interact key (CVar SoftTargetInteract, Options > Controls > "Enable Interact Key"). Chest detection will
 -- need it on, and it keeps getting switched off. Say so loudly when it is off, offer /fr fixinteract, and
--- record who changed it: a Lua caller (from C_CVar.SetCVar, which the global SetCVar also goes through) or,
+-- record who changed it: a Lua caller (from C_CVar.SetCVar; the global SetCVar is Blizzard's Lua wrapper in
+-- Blizzard_SharedXMLBase/CvarUtil.lua, skipped when walking the stack for the caller) or,
 -- with no Lua caller in the same frame, the client or the settings panel.
 -- ---------------------------------------------------------------------------------------------------------
 local INTERACT = "SoftTargetInteract"

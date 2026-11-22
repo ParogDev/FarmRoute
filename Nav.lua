@@ -227,7 +227,9 @@ function Nav.initScreenLine()
 	lineFrame:SetScript("OnUpdate", function()
 		local ok, x, y = pcall(marker.GetCenter, marker)
 		if ok and x and y and not issecretvalue(x) and not issecretvalue(y) then
-			line:SetEndPoint("BOTTOMLEFT", UIParent, x, y)
+			-- GetCenter is in the marker's scale; the end point offsets are in UIParent's
+			local s = marker:GetEffectiveScale() / UIParent:GetEffectiveScale()
+			line:SetEndPoint("BOTTOMLEFT", UIParent, x * s, y * s)
 		end
 	end)
 
