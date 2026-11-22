@@ -77,6 +77,12 @@ describe("finds", function()
 		assert.equals("new", action)
 		assert.equals(2, at) -- between 1 (0,0) and 2 (40,0)
 		assert.equals("far", (L.findTarget(r, yards(r), 200, 200)))
+		assert.equals("far", (L.findTarget(r, {}, 0, 0))) -- no point on this continent
+		-- a point added by hand is confirmed by a loot near it, not duplicated
+		r.points[2].manual = true
+		local manualAction, manualI = L.findTarget(r, yards(r), 40, 6)
+		assert.equals("confirm", manualAction)
+		assert.equals(2, manualI)
 		assert.same({ [1] = 1, [3] = 2, [4] = 3 }, L.removeMap(4, 2))
 		local map = L.insertMap(4, at)
 		assert.same({ 1, 3, 4, 5 }, map)

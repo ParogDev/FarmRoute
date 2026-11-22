@@ -499,9 +499,11 @@ function L.findTarget(route, list, x, y)
 		local p = route.points[e.i]
 		local d = L.distance(x, y, e.x, e.y)
 		nearest = math.min(nearest or d, d)
+		-- a point added by hand with no find yet is confirmed by the first one like a seed
+		local unconfirmed = L.isUnconfirmed(p) or (p.manual and not L.isConfirmed(p) and not L.isPath(p))
 		if L.isConfirmed(p) and d <= L.MERGE_YD and (not md or d < md) then
 			mi, md = e.i, d
-		elseif L.isUnconfirmed(p) and d <= L.SEED_YD and (not ud or d < ud) then
+		elseif unconfirmed and d <= L.SEED_YD and (not ud or d < ud) then
 			ui, ud = e.i, d
 		end
 	end
@@ -511,7 +513,8 @@ function L.findTarget(route, list, x, y)
 	if ui then
 		return "confirm", ui, ud
 	end
-	if #list > 0 and nearest > L.FIND_MAX_YD then
+	-- no point of the route on this continent, or none near: the same chest kind somewhere else
+	if #list == 0 or nearest > L.FIND_MAX_YD then
 		return "far", nil, nearest
 	end
 	return "new", L.insertionIndex(list, x, y)

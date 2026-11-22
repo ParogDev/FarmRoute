@@ -423,9 +423,15 @@ describe("FarmRoute core", function()
 		assert.equals(1, route.points[1].finds)
 		assert.near(mock.pos[1], route.points[1].x, 1e-9)
 		-- far from every point: a new spawn; history keyed by index follows the insert
-		-- the same chest opened again is no new find
+		-- the same chest opened again is no new find; respawned (same GUID) minutes later, it is
 		mock.fire("LOOT_OPENED")
 		assert.equals(1, #FarmRouteDB.finds)
+		mock.gameTime = mock.gameTime + 300
+		mock.fire("LOOT_OPENED")
+		assert.equals(2, #FarmRouteDB.finds)
+		assert.equals("merge", FarmRouteDB.finds[2].action)
+		assert.equals(2, route.points[1].finds)
+		table.remove(FarmRouteDB.finds)
 		FarmRouteDB.history["Angor Battered"] = { [14] = { visits = { { t = 1, seen = true } } } }
 		-- the same chest kind far from the route (another place): not learned
 		mock.pos = { 0.30, 0.30 }

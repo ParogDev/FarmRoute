@@ -435,23 +435,43 @@ function ns.remapRoute(name, map)
 		seenThisLoop = L.remap(seenThisLoop, map)
 		if chest then
 			chest.point = map[chest.point]
+			if not chest.point then -- the detected chest's point was deleted
+				chest = nil
+			end
 		end
 	end
+	-- the stretch being walked keeps its remaining vias
 	if via.route == name then
-		via = { list = {}, at = 1 }
+		local list, at = {}, 1
+		for k, i in ipairs(via.list) do
+			if map[i] then
+				list[#list + 1] = map[i]
+				if k < via.at then
+					at = at + 1
+				end
+			end
+		end
+		via.list, via.at = list, at
 	end
-	-- a learn plan waiting for accept names chests by index too (a point is only ever inserted meanwhile)
-	local plan = db.learn[name] and db.learn[name].plan
-	if plan then
-		for k, i in ipairs(plan.order) do
-			plan.order[k] = map[i] or i
+	-- a learn plan waiting for accept names chests by index too; one whose chest was deleted is dropped
+	local lr = db.learn[name]
+	if lr and lr.plan then
+		for k, i in ipairs(lr.plan.order) do
+			if not map[i] then
+				lr.plan = nil
+				say("a point of the learn walk was deleted: walk discarded, /fr learn on to walk again")
+				return
+			end
+			lr.plan.order[k] = map[i]
 		end
 	end
 end
 
 -- The game object id of what the open loot window came from (first slot with a GameObject source), or nil
--- and why. The same chest opened again (loot left in it) is no new find.
-local lastLootGuid
+-- and why. The same chest opened again within REOPEN seconds (loot left in it) is no new find; a chest keeps
+-- its GUID when it respawns, so later it is one.
+local lastLootGuid, lastLootAt = nil, 0
+local REOPEN = 60
 local function lootObject()
 	local n = GetNumLootItems and GetNumLootItems() or 0
 	for slot = 1, n do
@@ -462,10 +482,10 @@ local function lootObject()
 			end
 			local id = L.guidObject(guid)
 			if id then
-				if guid == lastLootGuid then
+				if guid == lastLootGuid and GetTime() - lastLootAt < REOPEN then
 					return nil, "same chest opened again"
 				end
-				lastLootGuid = guid
+				lastLootGuid, lastLootAt = guid, GetTime()
 				return id
 			end
 		end
@@ -485,7 +505,7 @@ function ns.recordFind(objectID)
 			local list = routeYards(route, c)
 			local action, i, d = L.findTarget(route, list, wx, wy)
 			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
-			if action == "far" or #list == 0 then -- luacheck: ignore 542
+			if action == "far" then -- luacheck: ignore 542
 				-- the same chest kind somewhere else: not this route's
 			elseif action == "new" then
 				local floor = route.points[1] and route.points[1].floor
