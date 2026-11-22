@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- The on-screen line now starts at the character, is thinner and fainter, and follows the marker every frame.
+- Interact key: only `3` (always on) counts as on. `1` is gamepad only, which Plater was found setting.
+
 ## 0.1.4
 
 - Interact key check: when Options > Controls > "Enable Interact Key" (`SoftTargetInteract`) is off, a red chat line says so after loading and whenever it changes, naming who turned it off: an addon (caught through `C_CVar.SetCVar`), or the client or settings panel. `/fr fixinteract` turns it back on (not in combat). `/fr interact` shows the last changes.

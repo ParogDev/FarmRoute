@@ -216,10 +216,20 @@ function Nav.initScreenLine()
 	lineFrame:SetFrameStrata("BACKGROUND")
 	lineFrame:EnableMouse(false)
 	line = lineFrame:CreateLine(nil, "ARTWORK")
-	line:SetThickness(3)
-	line:SetColorTexture(1, 0.82, 0, 0.55)
-	line:SetStartPoint("BOTTOM", UIParent, 0, 80)
+	line:SetThickness(1.5)
+	line:SetColorTexture(1, 0.82, 0, 0.3)
+	-- No API gives the character's screen position; with the default camera the character stands at the
+	-- horizontal centre, a little below the vertical centre.
+	line:SetStartPoint("CENTER", UIParent, 0, -50)
 	lineFrame:Hide()
+	-- The end follows the marker every frame (the marker itself is anchored, so it already moves smoothly);
+	-- the route logic stays on the 0.25 s ticker.
+	lineFrame:SetScript("OnUpdate", function()
+		local ok, x, y = pcall(marker.GetCenter, marker)
+		if ok and x and y and not issecretvalue(x) and not issecretvalue(y) then
+			line:SetEndPoint("BOTTOMLEFT", UIParent, x, y)
+		end
+	end)
 
 	marker = CreateFrame("Frame", nil, UIParent)
 	marker:SetSize(22, 22)
