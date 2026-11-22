@@ -196,4 +196,48 @@ describe("FarmRoute core", function()
 		assert.is_false(opts.persistent)
 		assert.equals("tomtom", ns.Nav.state.mode)
 	end)
+
+	it("probe logs a footlocker appearing and going, with the nearest point and the skill it needs", function()
+		mock.login(nil)
+		local p = ns.activeRoute().points[7]
+		mock.pos = { p.x + 10 / mock.YARDS, p.y }
+		mock.soft = {
+			guid = "GameObject-0-1-0-12-179490-00001",
+			name = "Battered Footlocker",
+			tooltip = { "Battered Footlocker", "Requires Lockpicking (150)" },
+			plate = true,
+		}
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		assert.is_nil(ns.selftest.lastError)
+		local ev = FarmRouteDB.probe.events[1]
+		assert.equals("seen", ev.kind)
+		assert.equals(179490, ev.objectID)
+		assert.equals(150, ev.need)
+		assert.equals("Angor Battered 7", ev.point)
+		assert.near(10, ev.pointYd, 0.1)
+		assert.equals(30, ev.z)
+		assert.matches("Battered Footlocker %(179490%), needs Lockpicking 150", table.concat(mock.chat, "\n"))
+		mock.soft = nil
+		mock.tick()
+		assert.equals("gone", FarmRouteDB.probe.events[2].kind)
+		local st = ns.selftest.snapshot("t").detect
+		assert.equals(1, st.objects["179490"].seen)
+		assert.equals(169, st.lockpicking)
+		assert.equals("3", st.cvars.SoftTargetInteract)
+		assert.is_nil(ns.selftest.lastError)
+	end)
+
+	it("probe keeps secret soft-interact values out of the saved log", function()
+		mock.login(nil)
+		local guid = "GameObject-0-1-0-12-179490-00001"
+		mock.secret[guid] = true
+		mock.secret["Battered Footlocker"] = true
+		mock.soft = { guid = guid, name = "Battered Footlocker", tooltip = { "Battered Footlocker" } }
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		for _, ev in ipairs(FarmRouteDB.probe.events) do
+			assert.is_nil(ev.objectID)
+			assert.is_nil(ev.name)
+		end
+		assert.is_true(ns.Detect.status.secret > 0)
+	end)
 end)

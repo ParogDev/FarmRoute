@@ -227,6 +227,53 @@ function L.isCurrentSegment(n, current, a, b)
 	return b == current and a == L.wrap(current - 1, n)
 end
 
+-- ---------------------------------------------------------------------------------------------------------
+-- Soft-interact reading (no client calls: the strings come in from Detect.lua)
+-- ---------------------------------------------------------------------------------------------------------
+
+-- The object id in a game object GUID ("GameObject-0-server-instance-zone-ID-spawn"), or nil.
+function L.guidObject(guid)
+	if type(guid) ~= "string" then
+		return nil
+	end
+	return tonumber(guid:match("^GameObject%-%d+%-%d+%-%d+%-%d+%-(%d+)"))
+end
+
+-- A Lua pattern from a format string such as ITEM_MIN_SKILL ("Requires %s (%d)"), capturing the skill name
+-- and the level. Positional forms ("%1$s") are taken too.
+function L.requiresPattern(fmt)
+	if type(fmt) ~= "string" or fmt == "" then
+		fmt = "Requires %s (%d)"
+	end
+	local p = fmt:gsub("%%%d?%$?([sd])", "\1%1")
+	p = p:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+	p = p:gsub("\1s", "(.-)")
+	p = p:gsub("\1d", "(%%d+)")
+	return "^" .. p .. "$"
+end
+
+-- The first tooltip line matching the pattern: skill name, level; or nil.
+function L.parseRequires(texts, pattern)
+	for _, t in ipairs(texts or {}) do
+		if type(t) == "string" then
+			local skill, level = t:match(pattern)
+			if skill and tonumber(level) then
+				return skill, tonumber(level)
+			end
+		end
+	end
+	return nil
+end
+
+-- Appends to a list kept at most max long (oldest dropped).
+function L.push(list, item, max)
+	list[#list + 1] = item
+	while #list > max do
+		table.remove(list, 1)
+	end
+	return item
+end
+
 function L.formatPoint(route, i)
 	local p = route.points[i]
 	if not p then

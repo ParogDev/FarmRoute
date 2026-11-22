@@ -181,6 +181,61 @@ function M.install()
 	_G.InCombatLockdown = function()
 		return M.combat
 	end
+	-- the soft-interact target: nil, or { guid, name, tooltip = { lines }, plate = bool }
+	M.soft = nil
+	_G.ITEM_MIN_SKILL = "Requires %s (%d)"
+	_G.UnitIsGameObject = function(u)
+		return u == "softinteract" and M.soft ~= nil
+	end
+	_G.UnitExists = function()
+		return false
+	end
+	_G.UnitGUID = function(u)
+		return u == "softinteract" and M.soft and M.soft.guid or nil
+	end
+	_G.UnitName = function(u)
+		return u == "softinteract" and M.soft and M.soft.name or nil
+	end
+	_G.C_NamePlate = {
+		GetNamePlateForUnit = function(u)
+			return u == "softinteract" and M.soft and M.soft.plate and widget() or nil
+		end,
+	}
+	_G.C_TooltipInfo = {
+		GetUnit = function(u)
+			if u ~= "softinteract" or not M.soft then
+				return nil
+			end
+			local lines = {}
+			for i, t in ipairs(M.soft.tooltip or { M.soft.name }) do
+				lines[i] = { leftText = t }
+			end
+			return { lines = lines }
+		end,
+		GetWorldCursor = function()
+			return nil
+		end,
+	}
+	_G.UnitPosition = function()
+		return 1, 2, 30, 0
+	end
+	_G.GetPlayerFacing = function()
+		return 0
+	end
+	_G.C_VignetteInfo = {
+		GetVignettes = function()
+			return {}
+		end,
+	}
+	M.skills = { { name = "Lockpicking", rank = 169, maxRank = 300 } }
+	_G.C_SkillInfo = {
+		GetNumSkillLines = function()
+			return #M.skills
+		end,
+		GetSkillLineInfo = function(i)
+			return M.skills[i]
+		end,
+	}
 	_G.LibStub = nil
 	_G.TomTom = nil
 	_G.FarmRoute, _G.FarmRouteDB = nil, nil
@@ -189,7 +244,7 @@ end
 -- Loads the addon files in .toc order with a shared namespace.
 function M.load()
 	local ns = {}
-	for _, f in ipairs({ "Logic.lua", "Nav.lua", "MapLines.lua", "Import.lua", "Core.lua" }) do
+	for _, f in ipairs({ "Logic.lua", "Nav.lua", "Detect.lua", "MapLines.lua", "Import.lua", "Core.lua" }) do
 		assert(loadfile(f))("FarmRoute", ns)
 	end
 	return ns

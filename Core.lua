@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.7"
+ns.VERSION = "0.2.0-probe"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -19,6 +19,7 @@ local DEFAULTS = {
 	mapLines = true,
 	minimapDots = true,
 	keepInteract = true,
+	probe = true,
 }
 
 local counters = { advanceArrived = 0, advanceKey = 0, advanceNavReached = 0, imports = 0, placeFailed = 0 }
@@ -172,6 +173,7 @@ function FarmRoute.Prev()
 end
 
 local function tick()
+	ns.guard("detect", ns.Detect.tick)
 	if not running then
 		Nav.hideMarker("stopped")
 		return
@@ -257,6 +259,7 @@ function selftest.snapshot(phase)
 		counters = counters,
 		interact = ns.interactState(),
 		interactLast = ns.db.interactLog and ns.db.interactLog[#ns.db.interactLog] or nil,
+		detect = ns.Detect.selftest(),
 		lastError = selftest.lastError,
 	}
 	return ns.db.selftest
@@ -284,6 +287,7 @@ local HELP = {
 	"/fr respawn <minutes> [n] - respawn timer for the route or point n (0 = off); /fr timers reset",
 	"/fr mode pin|tomtom - Blizzard's in-world pin or TomTom's arrow; /fr line on|off; /fr map on|off; /fr minimap on|off",
 	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on; /fr keepinteract on|off - keep it on",
+	"/fr probe [on|off] - what soft-interact has measured (chat line per change when on)",
 }
 
 local function onOff(v)
@@ -500,6 +504,38 @@ function commands.keepinteract(arg)
 	toggle("keepInteract", arg, "keep the interact key on")
 end
 
+-- /fr probe on|off: a chat line per soft-interact change; /fr probe: what it has measured so far.
+function commands.probe(arg)
+	if arg == "on" or arg == "off" then
+		toggle("probe", arg, "soft-interact probe")
+		return
+	end
+	local p = ns.Detect.probeDB()
+	say(string.format("probe %s: %d events logged", onOff(ns.db.settings.probe), #p.events))
+	for key, o in pairs(p.objects) do
+		say(
+			string.format(
+				"  %s (%s): seen %d, needs %s, appeared %s-%s yd from the nearest point",
+				tostring(o.name),
+				key,
+				o.seen,
+				tostring(o.need or "?"),
+				tostring(o.appearMin or "?"),
+				tostring(o.appearMax or "?")
+			)
+		)
+	end
+	local cv = ns.Detect.cvars()
+	say(
+		"  Range "
+			.. cv.SoftTargetInteractRange
+			.. ", Arc "
+			.. cv.SoftTargetInteractArc
+			.. ", OnlyInRange "
+			.. cv.SoftTargetInteractOnlyInRange
+	)
+end
+
 function commands.minimap(arg)
 	toggle("minimapDots", arg, "minimap route")
 end
@@ -695,6 +731,7 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("NAVIGATION_DESTINATION_REACHED")
 frame:RegisterEvent("CVAR_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frame:RegisterEvent("PLAYER_SOFT_INTERACT_CHANGED")
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
 		if ... == ADDON then
@@ -721,6 +758,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
 			guard("tick", tick)
 		end)
 		guard("snapshot", selftest.snapshot, "login")
+	elseif event == "PLAYER_SOFT_INTERACT_CHANGED" then
+		if ns.db then
+			guard("softChanged", ns.Detect.update, "event")
+		end
 	elseif event == "PLAYER_LOGOUT" then
 		guard("snapshot", selftest.snapshot, "logout")
 	elseif event == "NAVIGATION_DESTINATION_REACHED" then
