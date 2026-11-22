@@ -153,6 +153,34 @@ function M.install()
 			fn()
 		end,
 	}
+	M.cvars = { SoftTargetInteract = "3" }
+	M.cvarHooks = {}
+	M.stack = '[string "@Interface/AddOns/Lueur/Lueur.lua"]:343: in function'
+	M.combat = false
+	_G.C_CVar = {
+		GetCVar = function(n)
+			return M.cvars[n]
+		end,
+		SetCVar = function(n, v)
+			M.cvars[n] = tostring(v)
+			for _, h in ipairs(M.cvarHooks) do
+				h(n, v)
+			end
+			M.fire("CVAR_UPDATE", n, tostring(v))
+			return true
+		end,
+	}
+	_G.hooksecurefunc = function(t, name, fn)
+		if t == _G.C_CVar and name == "SetCVar" then
+			M.cvarHooks[#M.cvarHooks + 1] = fn
+		end
+	end
+	_G.debugstack = function()
+		return M.stack
+	end
+	_G.InCombatLockdown = function()
+		return M.combat
+	end
 	_G.LibStub = nil
 	_G.TomTom = nil
 	_G.FarmRoute, _G.FarmRouteDB = nil, nil

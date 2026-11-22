@@ -93,6 +93,33 @@ describe("FarmRoute core", function()
 		assert.is_false(ns.Nav.marker.shown)
 	end)
 
+	it("warns when the interact key is off and names who turned it off", function()
+		mock.login(nil)
+		C_CVar.SetCVar("SoftTargetInteract", 0) -- the mock stack says Lueur
+		assert.equals("Lueur", FarmRouteDB.interactLog[1].by)
+		assert.matches("Interact key is off.*turned off by Lueur", mock.chat[#mock.chat])
+		assert.is_false(ns.selftest.snapshot("t").interact.ok)
+		-- a change with no Lua caller
+		mock.cvars.SoftTargetInteract = "3"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "3")
+		mock.cvars.SoftTargetInteract = "0"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "0")
+		assert.equals("client or settings panel", FarmRouteDB.interactLog[3].by)
+		SlashCmdList.FARMROUTE("fixinteract")
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.equals("FarmRoute (/fr fixinteract)", FarmRouteDB.interactLog[4].by)
+		assert.is_true(ns.interactState().ok)
+	end)
+
+	it("fixinteract waits for combat to end", function()
+		mock.login(nil)
+		mock.cvars.SoftTargetInteract = "0"
+		mock.combat = true
+		SlashCmdList.FARMROUTE("fixinteract")
+		assert.equals("0", mock.cvars.SoftTargetInteract)
+		assert.matches("in combat", mock.chat[#mock.chat])
+	end)
+
 	it("keybind functions move both ways", function()
 		mock.login(nil)
 		FarmRoute.Prev()

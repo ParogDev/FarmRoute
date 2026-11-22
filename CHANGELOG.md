@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Interact key check: when Options > Controls > "Enable Interact Key" (`SoftTargetInteract`) is off, a red chat line says so after loading and whenever it changes, naming who turned it off: an addon (caught through `C_CVar.SetCVar`), or the client or settings panel. `/fr fixinteract` turns it back on (not in combat). `/fr interact` shows the last changes.
+
 ## 0.1.3
 
 - Fixed: an error on every tick that stopped arrival detection. Waypoint and map positions come back from the client as plain tables and are now read field by field.
