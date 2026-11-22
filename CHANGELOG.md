@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Probe chat lines are only for chests of the active route, once per chest every 30 s. Chairs and stools that take the soft target stay in the saved log only.
+
 ## 0.2.1
 
 - The minimum Lockpicking now comes from the mouseover tooltip: in game, the soft target's own tooltip has no lines. Hover a footlocker once and the marker shows its level from then on.

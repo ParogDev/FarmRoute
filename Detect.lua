@@ -170,7 +170,13 @@ local function probeDB()
 end
 D.probeDB = probeDB
 
-local function say(line)
+-- Chat only for chests of the active route: chairs and stools take the soft target all the time in Angor
+-- Fortress (probe, 2026-11-21) and stay in the SavedVariables log only.
+local function say(line, target)
+	local route = ns.activeRoute and ns.activeRoute()
+	if not (target and route and L.matchesRoute(route, target.objectID, target.need)) then
+		return
+	end
 	if ns.db.settings.probe then
 		ns.say("|cff80c0ffprobe:|r " .. line)
 	end
@@ -211,15 +217,7 @@ function D.update(source)
 		ctx.kind, ctx.objectID, ctx.name = "gone", gone.objectID, gone.name
 		ctx.heldFor = round(ctx.t - (gone.since or ctx.t))
 		ctx.source = source
-		L.push(p.events, ctx, MAX_EVENTS)
-		say(
-			string.format(
-				"lost %s; nearest point %s at %s yd",
-				tostring(gone.name),
-				tostring(ctx.point),
-				tostring(ctx.pointYd)
-			)
-		)
+		L.push(p.events, ctx, MAX_EVENTS) -- losses are logged, not said: the target flips every 0.1 s
 		ctx = context()
 	end
 	lastSoftGUID = guid
@@ -232,6 +230,13 @@ function D.update(source)
 		ctx.tooltip = t.tooltip
 		L.push(p.events, ctx, MAX_EVENTS)
 		noteObject(p, t, ctx)
+		-- one line per chest per 30 s
+		local said = D.saidAt and D.saidAt[guid]
+		D.saidAt = D.saidAt or {}
+		if said and ctx.t - said < 30 then
+			return t
+		end
+		D.saidAt[guid] = ctx.t
 		say(
 			string.format(
 				"%s (%s)%s; nearest point %s at %s yd; nameplate %s",
@@ -241,7 +246,8 @@ function D.update(source)
 				tostring(ctx.point),
 				tostring(ctx.pointYd),
 				t.plate and ("yes, alpha " .. tostring(t.alpha)) or "no"
-			)
+			),
+			t
 		)
 	end
 	return t

@@ -362,6 +362,14 @@ describe("FarmRoute core", function()
 		assert.is_nil(ns.selftest.lastError)
 	end)
 
+	it("probe chat names only chests of the active route; chairs stay in the log", function()
+		mock.login(nil)
+		mock.soft = { guid = "GameObject-0-1-0-12-61088-00001", name = "Wooden Chair", tooltip = {} }
+		mock.fire("PLAYER_SOFT_INTERACT_CHANGED")
+		assert.is_nil(table.concat(mock.chat, "\n"):find("Wooden Chair"))
+		assert.equals(61088, FarmRouteDB.probe.events[1].objectID)
+	end)
+
 	it("probe keeps secret soft-interact values out of the saved log", function()
 		mock.login(nil)
 		local guid = "GameObject-0-1-0-12-179490-00001"
