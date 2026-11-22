@@ -1130,12 +1130,9 @@ function commands.del(arg)
 		say("no point " .. tostring(arg))
 		return
 	end
-	-- history, checked, timers, the objective and the vias are keyed by index: move them with the points
-	local cur = ns.db.current[route.name]
+	-- history, checked, timers, the objective and the vias are keyed by index: move them with the points. A
+	-- deleted current point hands over to the next one (Logic.remapIndex, wrapping to the first).
 	ns.remapRoute(route.name, L.removeMap(#route.points, n))
-	if cur == n then
-		ns.db.current[route.name] = math.min(n, #route.points - 1)
-	end
 	table.remove(route.points, n)
 	say("removed point " .. n .. "; " .. #route.points .. " left")
 	place()
