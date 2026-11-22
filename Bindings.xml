@@ -1,0 +1,8 @@
+<Bindings>
+	<Binding name="FARMROUTE_NEXT" header="FARMROUTE">
+		FarmRoute.Next()
+	</Binding>
+	<Binding name="FARMROUTE_PREV">
+		FarmRoute.Prev()
+	</Binding>
+</Bindings>
