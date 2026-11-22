@@ -179,13 +179,14 @@ local function drawLearn(shown, w, h, scale)
 		return
 	end
 	local runs = view.runs or {}
-	local n = 0
+	local n, segs = 0, 0
 	for _, run in ipairs(runs) do
 		n = n + #run
+		segs = segs + math.max(0, #run - 1)
 	end
 	local ti, mi, ki = 0, 0, 0
 	local alpha = view.recording and TEAL[4] or 0.45 -- a finished walk steps back a little
-	local step = math.max(1, math.ceil((n - 1) / TRAIL_MAX))
+	local step = math.max(1, math.ceil(segs / TRAIL_MAX))
 	-- each run is its own line: nothing is drawn across a gap in the walk
 	for _, samples in ipairs(runs) do
 		local i = 1

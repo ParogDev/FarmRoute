@@ -788,6 +788,23 @@ function L.learnPlan(samples, chests, tol)
 	end
 	closeRun()
 
+	-- a stretch with a pause in sampling (gap) or a jump in it was not walked: it gets no vias
+	local function unbroken(first, last)
+		for k = first + 1, last do
+			local s, p = samples[k], samples[k - 1]
+			if s.gap or L.distance(p.x, p.y, s.x, s.y) > L.TRAIL_GAP_YD then
+				return false
+			end
+		end
+		return true
+	end
+	local function stretch(prev, cur)
+		if unbroken(prev.s, cur.s) then
+			return stretchVias(prev.c, samples, prev.s, cur.s, cur.c, tol)
+		end
+		return nil
+	end
+
 	local plan = { order = {}, vias = {}, visits = #visits }
 	local pos = {} -- chest i -> position in order
 	for v = 1, #visits do
@@ -798,12 +815,12 @@ function L.learnPlan(samples, chests, tol)
 			local prev = visits[v - 1]
 			-- vias only for a stretch walked straight from the chest just before it in the order
 			if prev and pos[prev.chest] == #plan.order - 1 then
-				plan.vias[#plan.order - 1] = stretchVias(prev.c, samples, prev.s, cur.s, cur.c, tol)
+				plan.vias[#plan.order - 1] = stretch(prev, cur)
 			end
 		elseif pos[cur.chest] == 1 and #plan.order > 1 and not plan.closing then
 			local prev = visits[v - 1]
 			if prev and pos[prev.chest] == #plan.order then
-				plan.closing = stretchVias(prev.c, samples, prev.s, cur.s, cur.c, tol)
+				plan.closing = stretch(prev, cur)
 			end
 		end
 	end
@@ -824,26 +841,26 @@ end
 
 -- The new point list for an accepted plan. entries: { { i, x, y, point } } for every route point (yards);
 -- makeVia(sample) builds a path point. Walked chests come in walking order with their vias; chests the walk
--- missed are put back at their cheapest place. A stretch the walk went straight along gets the new vias; one
--- it didn't keeps the old path points that ran between the same two chests. Returns points, the old -> new
--- index map and how many old path points were kept.
+-- missed are put back at their cheapest place. Each old path point belongs to the chest before it: a chest
+-- whose stretch the walk went straight along gets the new vias instead, every other chest (missed ones too)
+-- keeps its old ones. Returns points, the old -> new index map and how many old path points were kept.
 function L.applyPlan(entries, plan, makeVia)
 	local byIndex, pos = {}, {}
 	for k, e in ipairs(entries) do
 		byIndex[e.i] = e
 		pos[e.i] = k
 	end
-	-- the old path entries straight after chest a, when the next chest in the old loop is b
-	local function oldVias(a, b)
+	-- the old path entries straight after chest a, up to the next chest of the old loop. They travel with a.
+	local function oldVias(a)
 		local list, n = {}, #entries
-		for k = 1, n do
+		for k = 1, n - 1 do
 			local e = entries[(pos[a] - 1 + k) % n + 1]
 			if not L.isPath(e.point) then
-				return e.i == b and list or {}
+				break
 			end
 			list[#list + 1] = e
 		end
-		return {}
+		return list
 	end
 	local walked = function(k)
 		if k < #plan.order then
@@ -864,7 +881,7 @@ function L.applyPlan(entries, plan, makeVia)
 					out[#out + 1] = makeVia(s)
 				end
 			else
-				for _, v in ipairs(oldVias(ci, plan.order[k % #plan.order + 1])) do
+				for _, v in ipairs(oldVias(ci)) do
 					out[#out + 1] = v.point
 					map[v.i] = #out
 					kept = kept + 1
@@ -876,20 +893,30 @@ function L.applyPlan(entries, plan, makeVia)
 	end
 	for _, e in ipairs(entries) do
 		if not placed[e.i] and not L.isPath(e.point) then
+			-- the missed chest goes in as a block with its old vias, after a whole stretch, so it never
+			-- splits a run of kept vias
+			local block = { e }
+			for _, v in ipairs(oldVias(e.i)) do
+				block[#block + 1] = v
+			end
 			local at = L.insertionIndex(chestPos, e.x, e.y)
-			table.insert(out, at, e.point)
+			local len = #block
 			for old, new in pairs(map) do
 				if new >= at then
-					map[old] = new + 1
+					map[old] = new + len
 				end
 			end
 			for _, c in ipairs(chestPos) do
 				if c.i >= at then
-					c.i = c.i + 1
+					c.i = c.i + len
 				end
 			end
-			map[e.i] = at
-			chestPos[#chestPos + 1] = { i = at, x = e.x, y = e.y }
+			for j, b in ipairs(block) do
+				table.insert(out, at + j - 1, b.point)
+				map[b.i] = at + j - 1
+			end
+			kept = kept + len - 1
+			chestPos[#chestPos + 1] = { i = at + len - 1, x = e.x, y = e.y }
 			table.sort(chestPos, function(a, b)
 				return a.i < b.i
 			end)

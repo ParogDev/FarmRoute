@@ -248,6 +248,45 @@ describe("0.3.1 fixes", function()
 		assert.is_nil(map[4])
 	end)
 
+	it("accept keeps the old vias of a missed chest's neighbour and of the missed chest itself", function()
+		-- old loop: A, v1, v2, M, v3, B. The walk visits A then B, not straight, and misses M.
+		local entries = {
+			{ i = 1, x = 0, y = 0, point = { name = "A" } },
+			{ i = 2, x = 3, y = 5, point = { name = "v1", kind = "path" } },
+			{ i = 3, x = 7, y = 5, point = { name = "v2", kind = "path" } },
+			{ i = 4, x = 10, y = 0, point = { name = "M" } },
+			{ i = 5, x = 15, y = 2, point = { name = "v3", kind = "path" } },
+			{ i = 6, x = 20, y = 0, point = { name = "B" } },
+		}
+		local plan = { order = { 1, 6 }, vias = {} }
+		local points, map, kept = L.applyPlan(entries, plan, function()
+			return { name = "via", kind = "path" }
+		end)
+		local names = {}
+		for k, p in ipairs(points) do
+			names[k] = p.name
+		end
+		assert.same({ "A", "v1", "v2", "M", "v3", "B" }, names)
+		assert.equals(3, kept)
+		for i = 1, 6 do
+			assert.equals(entries[i].point, points[map[i]])
+		end
+	end)
+
+	it("a stretch with a pause in sampling gets no vias, so its old ones stay", function()
+		local chests = { { i = 1, x = 0, y = 0 }, { i = 2, x = 30, y = 30 } }
+		local samples = {}
+		for x = 0, 30, 3 do
+			samples[#samples + 1] = { x = x, y = 0 }
+		end
+		for y = 3, 30, 3 do
+			samples[#samples + 1] = { x = 30, y = y, gap = y == 15 or nil }
+		end
+		local plan = L.learnPlan(samples, chests)
+		assert.same({ 1, 2 }, plan.order)
+		assert.is_nil(plan.vias[1])
+	end)
+
 	it("a point added by hand shows unconfirmed until a loot lands on it", function()
 		local r = route({ { 0, 0, manual = true }, { 30, 0, manual = true, finds = 1 } })
 		assert.equals("unconfirmed", L.pointStatus(r, {}, 1))

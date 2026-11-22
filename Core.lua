@@ -874,7 +874,7 @@ local function learnInput(route, lr)
 	local samples, chests = {}, {}
 	for _, s in ipairs(lr.samples) do
 		if s.c == c then
-			samples[#samples + 1] = { x = s.wx, y = s.wy, mapID = s.mapID, mx = s.x, my = s.y }
+			samples[#samples + 1] = { x = s.wx, y = s.wy, mapID = s.mapID, mx = s.x, my = s.y, gap = s.gap }
 		end
 	end
 	local entries = c and routeYards(route, c) or {}
@@ -896,7 +896,7 @@ function ns.learnView()
 	-- runs, not one line: a stretch off the route map or without a position is a break in the trail
 	v.runs = L.trailRuns(lr.samples, v.mapID)
 	local last = lr.samples[#lr.samples]
-	if last and last.mapID == v.mapID then
+	if last and last.mapID == v.mapID and not lr.gap then -- paused: no head dot posing as the live position
 		v.head = { x = last.x, y = last.y }
 	end
 	if lr.plan then
