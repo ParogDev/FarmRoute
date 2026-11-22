@@ -21,6 +21,7 @@ else
 	read_globals = {
 		"CreateFrame", "C_AddOns", "C_Map", "C_SuperTrack", "C_Navigation", "C_Timer", "GetBuildInfo",
 		"WOW_PROJECT_ID", "issecretvalue", "date", "time", "GetTime", "hooksecurefunc", "tinsert",
+		"C_CVar", "debugstack", "InCombatLockdown",
 	}
 end
 -- FrameXML globals the generated list doesn't carry (it is built from the C API lists).

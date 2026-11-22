@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.0"
+ns.VERSION = "0.1.6"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -37,6 +37,7 @@ function ns.initDB(saved)
 	db.current = db.current or {}
 	db.timers = db.timers or {}
 	db.settings = db.settings or {}
+	db.interactLog = db.interactLog or {}
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then
 			db.settings[k] = v
@@ -50,6 +51,10 @@ function ns.initDB(saved)
 		end
 		db.active = db.active or "Angor Battered"
 		db.seeded = true
+	end
+	-- never switched off: walking (a fresh install shows the pin, not a stopped status line)
+	if db.running == nil then
+		db.running = true
 	end
 	db.selftest = db.selftest or {}
 	ns.db = db
@@ -167,10 +172,10 @@ end
 
 local function tick()
 	if not running then
-		Nav.updateScreenLine(false)
+		Nav.hideMarker("stopped")
 		return
 	end
-	Nav.updateScreenLine(ns.db.settings.screenLine)
+	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius)
 	local route, i = ns.activeRoute(), ns.currentIndex()
 	if not route or not i then
 		return
@@ -196,7 +201,7 @@ function ns.stop()
 	running = false
 	ns.db.running = false
 	Nav.clear()
-	Nav.updateScreenLine(false)
+	Nav.hideMarker("stopped")
 	MapLines.refresh()
 end
 
@@ -249,6 +254,8 @@ function selftest.snapshot(phase)
 		maps = MapLines.status,
 		settings = ns.db.settings,
 		counters = counters,
+		interact = ns.interactState(),
+		interactLast = ns.db.interactLog and ns.db.interactLog[#ns.db.interactLog] or nil,
 		lastError = selftest.lastError,
 	}
 	return ns.db.selftest
@@ -275,6 +282,7 @@ local HELP = {
 	"/fr radius <yards> - arrival distance (now %d); /fr auto on|off - advance on arrival",
 	"/fr respawn <minutes> [n] - respawn timer for the route or point n (0 = off); /fr timers reset",
 	"/fr mode pin|tomtom - Blizzard's in-world pin or TomTom's arrow; /fr line on|off; /fr map on|off; /fr minimap on|off",
+	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on",
 }
 
 local function onOff(v)
@@ -298,6 +306,9 @@ local function status()
 			Nav.state.ok and (Nav.state.mode or "?") or tostring(Nav.state.why)
 		)
 	)
+	if not running then
+		say("/fr on starts the route; /fr help lists the commands")
+	end
 end
 
 local function toggle(key, arg, label)
@@ -510,6 +521,124 @@ SlashCmdList.FARMROUTE = function(msg)
 	end
 end
 
+-- ---------------------------------------------------------------------------------------------------------
+-- Interact key (CVar SoftTargetInteract, Options > Controls > "Enable Interact Key"). Chest detection will
+-- need it on, and it keeps getting switched off. Say so loudly when it is off, offer /fr fixinteract, and
+-- record who changed it: a Lua caller (from C_CVar.SetCVar; the global SetCVar is Blizzard's Lua wrapper in
+-- Blizzard_SharedXMLBase/CvarUtil.lua, skipped when walking the stack for the caller) or,
+-- with no Lua caller in the same frame, the client or the settings panel.
+-- ---------------------------------------------------------------------------------------------------------
+local INTERACT = "SoftTargetInteract"
+local INTERACT_ON = "3" -- always on, as Lueur sets it
+local lastLuaSet -- { value, by, at = GetTime() }
+local interactWarned
+
+local function interactValue()
+	local ok, v = pcall(C_CVar.GetCVar, INTERACT)
+	return ok and v or nil
+end
+
+function ns.interactState()
+	local v = interactValue()
+	if v == nil then
+		return { ok = false, value = "nil", why = INTERACT .. " not readable" }
+	end
+	-- 0 off, 1 gamepad only, 2 keyboard and mouse, 3 always: only 3 gives keyboard soft-interact (as Lueur needs)
+	if v == INTERACT_ON then
+		return { ok = true, value = v }
+	end
+	local what = v == "1" and "set to gamepad only" or (v == "0" and "off" or ("set to " .. v))
+	return { ok = false, value = v, why = "Interact key is " .. what .. ": chest detection can't work" }
+end
+
+-- The addon folder of the first stack frame outside FarmRoute and Blizzard's CVar code.
+local function callerAddon()
+	local stack = debugstack(3, 12, 0) or ""
+	for folder in stack:gmatch("AddOns[/\\]([^/\\]+)[/\\]") do
+		if folder ~= ADDON and not folder:find("^Blizzard_SharedXML") then
+			return folder
+		end
+	end
+	return stack:find("AddOns", 1, true) and "Blizzard UI" or "unknown Lua"
+end
+
+local function logInteract(value, by)
+	local log = ns.db.interactLog
+	log[#log + 1] = { value = tostring(value), by = by, at = date("%Y-%m-%d %H:%M:%S") }
+	while #log > 20 do
+		table.remove(log, 1)
+	end
+end
+
+function ns.checkInteract(source)
+	local st = ns.interactState()
+	if st.ok then
+		interactWarned = false
+		return st
+	end
+	if not interactWarned then
+		interactWarned = true
+		local last = ns.db.interactLog[#ns.db.interactLog]
+		local who = last and last.value ~= INTERACT_ON and (" (turned off by " .. last.by .. " at " .. last.at .. ")")
+			or ""
+		say("|cffff4040" .. st.why .. who .. ".|r Type /fr fixinteract to turn it on. [" .. source .. "]")
+	end
+	return st
+end
+
+local selfSet = false
+
+-- CVAR_UPDATE may fire inside SetCVar, before the post-hook has recorded the caller: attribute next frame.
+function ns.onCVarUpdate(name, value)
+	if name ~= INTERACT then
+		return
+	end
+	C_Timer.After(0, function()
+		local by = "client or settings panel"
+		if lastLuaSet and GetTime() - lastLuaSet.at < 0.5 then
+			by = lastLuaSet.by
+		end
+		lastLuaSet = nil
+		logInteract(value or interactValue(), by)
+		ns.checkInteract("changed by " .. by)
+	end)
+end
+
+function ns.hookInteract()
+	ns.db.interactLog = ns.db.interactLog or {}
+	hooksecurefunc(C_CVar, "SetCVar", function(name, value)
+		if name == INTERACT then
+			lastLuaSet =
+				{ value = value, by = selfSet and "FarmRoute (/fr fixinteract)" or callerAddon(), at = GetTime() }
+		end
+	end)
+end
+
+function commands.fixinteract()
+	if InCombatLockdown() then
+		say("in combat: try /fr fixinteract again after combat")
+		return
+	end
+	selfSet = true
+	local ok, err = pcall(C_CVar.SetCVar, INTERACT, INTERACT_ON)
+	selfSet = false
+	local st = ns.interactState()
+	if ok and st.ok then
+		say("Interact key on (" .. INTERACT .. " = " .. st.value .. ")")
+	else
+		say("couldn't turn the interact key on: " .. tostring(err or st.why))
+	end
+end
+
+function commands.interact()
+	local st = ns.interactState()
+	say(INTERACT .. " = " .. st.value .. (st.ok and " (on)" or " (off: /fr fixinteract)"))
+	for i = math.max(1, #ns.db.interactLog - 4), #ns.db.interactLog do
+		local e = ns.db.interactLog[i]
+		say("  " .. e.at .. ": " .. e.value .. " by " .. e.by)
+	end
+end
+
 BINDING_HEADER_FARMROUTE = "FarmRoute"
 BINDING_NAME_FARMROUTE_NEXT = "Next point"
 BINDING_NAME_FARMROUTE_PREV = "Previous point"
@@ -523,11 +652,23 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("NAVIGATION_DESTINATION_REACHED")
+frame:RegisterEvent("CVAR_UPDATE")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
 		if ... == ADDON then
 			ns.initDB(FarmRouteDB)
+			guard("hookInteract", ns.hookInteract)
 		end
+	elseif event == "CVAR_UPDATE" then
+		if ns.db then
+			guard("cvar", ns.onCVarUpdate, ...)
+		end
+	elseif event == "PLAYER_ENTERING_WORLD" then
+		-- the client resets some soft-target CVars around this event: look a few seconds later
+		C_Timer.After(3, function()
+			guard("checkInteract", ns.checkInteract, "after loading")
+		end)
 	elseif event == "PLAYER_LOGIN" then
 		selftest.loadedAt = date("%Y-%m-%d %H:%M:%S")
 		L.pruneTimers(ns.timersFor(ns.db.active or ""), time())

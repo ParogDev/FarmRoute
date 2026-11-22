@@ -33,14 +33,9 @@ widgetMeta.__index = function(_, k)
 	return noop
 end
 
+-- Plain { x, y }, as the C API returns (a 0.1.1 tick called :GetXY() on a waypoint position and failed in game)
 local function vec(x, y)
-	return {
-		x = x,
-		y = y,
-		GetXY = function(self)
-			return self.x, self.y
-		end,
-	}
+	return { x = x, y = y }
 end
 
 -- Badlands-like map: 1 map unit = 3000 yards.
@@ -51,6 +46,8 @@ function M.install()
 	M.now, M.gameTime = 1000000, 500
 	M.mapID, M.pos = 1418, { 0.5, 0.5 }
 	M.waypoint, M.superTracked = nil, false
+	M.navFrame, M.navDistance = nil, nil
+	M.widget = widget
 	_G.CreateFrame = function()
 		local f = widget({ _events = {} })
 		function f:RegisterEvent(e)
@@ -136,10 +133,13 @@ function M.install()
 	}
 	_G.C_Navigation = {
 		GetFrame = function()
-			return nil
+			return M.navFrame
 		end,
 		HasValidScreenPosition = function()
-			return false
+			return M.navFrame ~= nil
+		end,
+		GetDistance = function()
+			return M.navDistance or 0
 		end,
 		WasClampedToScreen = function()
 			return false
@@ -153,6 +153,34 @@ function M.install()
 			fn()
 		end,
 	}
+	M.cvars = { SoftTargetInteract = "3" }
+	M.cvarHooks = {}
+	M.stack = '[string "@Interface/AddOns/Lueur/Lueur.lua"]:343: in function'
+	M.combat = false
+	_G.C_CVar = {
+		GetCVar = function(n)
+			return M.cvars[n]
+		end,
+		SetCVar = function(n, v)
+			M.cvars[n] = tostring(v)
+			for _, h in ipairs(M.cvarHooks) do
+				h(n, v)
+			end
+			M.fire("CVAR_UPDATE", n, tostring(v))
+			return true
+		end,
+	}
+	_G.hooksecurefunc = function(t, name, fn)
+		if t == _G.C_CVar and name == "SetCVar" then
+			M.cvarHooks[#M.cvarHooks + 1] = fn
+		end
+	end
+	_G.debugstack = function()
+		return M.stack
+	end
+	_G.InCombatLockdown = function()
+		return M.combat
+	end
 	_G.LibStub = nil
 	_G.TomTom = nil
 	_G.FarmRoute, _G.FarmRouteDB = nil, nil

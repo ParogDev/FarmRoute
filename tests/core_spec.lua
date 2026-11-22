@@ -13,6 +13,9 @@ describe("FarmRoute core", function()
 		assert.is_not_nil(FarmRouteDB.routes["Angor Battered"])
 		assert.equals("Angor Battered", FarmRouteDB.active)
 		assert.equals(8, FarmRouteDB.settings.radius)
+		-- a fresh install is running and has placed the pin
+		assert.is_true(FarmRouteDB.running)
+		assert.equals(1418, mock.waypoint.uiMapID)
 		local saved = FarmRouteDB
 		saved.routes["Angor Dented"] = nil
 		mock.install()
@@ -75,6 +78,56 @@ describe("FarmRoute core", function()
 		assert.matches("secret", FarmRouteDB.selftest and ns.selftest.snapshot("t").distanceWhy)
 	end)
 
+	it("draws its own marker on the navigation frame, and names why when it can't", function()
+		mock.login(nil)
+		mock.tick()
+		assert.is_nil(ns.selftest.lastError) -- a tick raised every 0.25 s in 0.1.1
+		assert.equals("C_Navigation.GetFrame() is nil", ns.Nav.marker.why)
+		mock.navFrame, mock.navDistance = mock.widget(), 17.4
+		mock.tick()
+		assert.is_true(ns.Nav.marker.shown)
+		local st = ns.selftest.snapshot("t").nav
+		assert.equals(17.4, st.navDistance)
+		SlashCmdList.FARMROUTE("off")
+		mock.tick()
+		assert.is_false(ns.Nav.marker.shown)
+	end)
+
+	it("warns when the interact key is off and names who turned it off", function()
+		mock.login(nil)
+		C_CVar.SetCVar("SoftTargetInteract", 0) -- the mock stack says Lueur
+		assert.equals("Lueur", FarmRouteDB.interactLog[1].by)
+		assert.matches("Interact key is off.*turned off by Lueur", mock.chat[#mock.chat])
+		assert.is_false(ns.selftest.snapshot("t").interact.ok)
+		-- a change with no Lua caller
+		mock.cvars.SoftTargetInteract = "3"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "3")
+		mock.cvars.SoftTargetInteract = "0"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "0")
+		assert.equals("client or settings panel", FarmRouteDB.interactLog[3].by)
+		SlashCmdList.FARMROUTE("fixinteract")
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.equals("FarmRoute (/fr fixinteract)", FarmRouteDB.interactLog[4].by)
+		assert.is_true(ns.interactState().ok)
+	end)
+
+	it("counts gamepad-only (1) as off, as Plater set it in game", function()
+		mock.login(nil)
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.is_false(ns.interactState().ok)
+		assert.matches("gamepad only.*turned off by Plater", mock.chat[#mock.chat])
+	end)
+
+	it("fixinteract waits for combat to end", function()
+		mock.login(nil)
+		mock.cvars.SoftTargetInteract = "0"
+		mock.combat = true
+		SlashCmdList.FARMROUTE("fixinteract")
+		assert.equals("0", mock.cvars.SoftTargetInteract)
+		assert.matches("in combat", mock.chat[#mock.chat])
+	end)
+
 	it("keybind functions move both ways", function()
 		mock.login(nil)
 		FarmRoute.Prev()
@@ -98,11 +151,7 @@ describe("FarmRoute core", function()
 	it("off removes only its own waypoint", function()
 		mock.login(nil)
 		SlashCmdList.FARMROUTE("on")
-		mock.waypoint = { uiMapID = 1, position = {
-			GetXY = function()
-				return 0.1, 0.1
-			end,
-		} }
+		mock.waypoint = { uiMapID = 1, position = { x = 0.1, y = 0.1 } }
 		SlashCmdList.FARMROUTE("off")
 		assert.equals(1, mock.waypoint.uiMapID)
 	end)
