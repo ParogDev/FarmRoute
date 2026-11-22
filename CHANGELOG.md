@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- `/fr learn accept` keeps the old path points of any stretch you didn't walk straight through, and says how many it kept. Path points on another continent stay too.
+- The learn trail on the world map breaks where the walk had no position on the route's map. It no longer draws a straight line across ground you didn't walk.
+- Deleting the current point, or accepting a walk, moves the pin to the next point instead of back to point 1.
+- A stored current point that is a path point or a dropped seed moves on to the next chest still in the loop.
+- A point added with `/fr add` shows as an unconfirmed (hollow) diamond until a loot lands on it. It still never drops.
+
 ## 0.3.0
 
 - Chest spawns are learned from the chests you loot (the loot window names the chest kind). A loot within 8 yd of a learned point moves it to the average of its finds. A loot within 15 yd of a seed point confirms it at the loot spot. Anywhere else within 60 yd of the route it adds a new point where the loop grows least. Further away it belongs to another place and is not learned. `/fr list` shows "learned xN", "unconfirmed" or "dropped".

@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.3.0"
+ns.VERSION = "0.3.1"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -112,15 +112,8 @@ function ns.currentIndex()
 	if not route then
 		return nil
 	end
-	local i = ns.db.current[route.name]
-	if not i or not route.points[i] then
-		i = #route.points > 0 and 1 or nil
-	end
-	-- the objective is a chest: a path point stored there (an edited route) moves on to the next chest
-	if i and L.isPath(route.points[i]) then
-		return L.nextIndex(route, {}, i, 1, 0) or i
-	end
-	return i
+	-- the objective is a chest in the loop: a path point or dropped seed stored there moves on to the next one
+	return L.currentStop(route, ns.db.current[route.name], ns.historyFor(route.name))
 end
 
 function ns.playerMap()
@@ -429,7 +422,8 @@ function ns.remapRoute(name, map)
 	db.checked[name] = L.remap(db.checked[name], map)
 	db.timers[name] = L.remap(db.timers[name], map)
 	if db.current[name] then
-		db.current[name] = map[db.current[name]] or 1
+		-- a deleted or replaced current point hands over to the next surviving one, not to point 1
+		db.current[name] = L.remapIndex(db.current[name], map)
 	end
 	if seenRoute == name then
 		seenThisLoop = L.remap(seenThisLoop, map)
@@ -696,6 +690,7 @@ local function learnTick(route)
 	end
 	local c, wx, wy, pm, px, py = Nav.playerWorld()
 	if not c then
+		lr.gap = true
 		return
 	end
 	local last = lr.samples[#lr.samples]
@@ -705,10 +700,12 @@ local function learnTick(route)
 	local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
 	if not mapID then
 		lr.why = mx -- shown by /fr learn and the selftest
+		lr.gap = true -- the next sample starts a new run of the trail
 		return
 	end
 	lr.why = nil
-	lr.samples[#lr.samples + 1] = { mapID = mapID, x = mx, y = my, wx = wx, wy = wy, c = c }
+	lr.samples[#lr.samples + 1] = { mapID = mapID, x = mx, y = my, wx = wx, wy = wy, c = c, gap = lr.gap }
+	lr.gap = nil
 	if GetTime() - lastLearnDraw >= LEARN_REDRAW then
 		lastLearnDraw = GetTime()
 		MapLines.refresh()
@@ -877,7 +874,7 @@ local function learnInput(route, lr)
 	local samples, chests = {}, {}
 	for _, s in ipairs(lr.samples) do
 		if s.c == c then
-			samples[#samples + 1] = { x = s.wx, y = s.wy, mapID = s.mapID, mx = s.x, my = s.y }
+			samples[#samples + 1] = { x = s.wx, y = s.wy, mapID = s.mapID, mx = s.x, my = s.y, gap = s.gap }
 		end
 	end
 	local entries = c and routeYards(route, c) or {}
@@ -895,11 +892,12 @@ function ns.learnView()
 	if not lr then
 		return nil
 	end
-	local v = { recording = lr.recording, mapID = route.points[1] and route.points[1].mapID, samples = {} }
-	for _, s in ipairs(lr.samples) do
-		if s.mapID == v.mapID then
-			v.samples[#v.samples + 1] = { x = s.x, y = s.y }
-		end
+	local v = { recording = lr.recording, mapID = route.points[1] and route.points[1].mapID }
+	-- runs, not one line: a stretch off the route map or without a position is a break in the trail
+	v.runs = L.trailRuns(lr.samples, v.mapID)
+	local last = lr.samples[#lr.samples]
+	if last and last.mapID == v.mapID and not lr.gap then -- paused: no head dot posing as the live position
+		v.head = { x = last.x, y = last.y }
 	end
 	if lr.plan then
 		v.suggestions, v.visits = {}, {}
@@ -960,16 +958,16 @@ local function learnCommand(arg)
 		end
 		local _, _, entries = learnInput(route, lr)
 		local floor = route.points[1] and route.points[1].floor
-		local points, map = L.applyPlan(entries, lr.plan, function(s)
+		local points, map, keptVias = L.applyPlan(entries, lr.plan, function(s)
 			return { mapID = s.mapID, x = s.mx, y = s.my, kind = "path", label = "path", floor = floor }
 		end)
-		-- points on another continent than the walk stay, appended
-		local kept = {}
+		-- points on another continent than the walk stay, appended in their order (path points too)
+		local onWalk = {}
 		for _, e in ipairs(entries) do
-			kept[e.i] = true
+			onWalk[e.i] = true
 		end
 		for i, p in ipairs(route.points) do
-			if not kept[i] and not L.isPath(p) then
+			if not onWalk[i] then
 				points[#points + 1] = p
 				map[i] = #points
 			end
@@ -977,7 +975,14 @@ local function learnCommand(arg)
 		ns.remapRoute(route.name, map)
 		route.points = points
 		ns.db.learn[route.name] = nil
-		say(string.format("route saved: %d points (%d path)", #points, #lr.plan.suggestions))
+		say(
+			string.format(
+				"route saved: %d points (%d new path, %d kept from stretches not walked)",
+				#points,
+				#lr.plan.suggestions,
+				keptVias
+			)
+		)
 		place()
 	elseif arg == "discard" then
 		ns.db.learn[route.name] = nil
@@ -1125,12 +1130,9 @@ function commands.del(arg)
 		say("no point " .. tostring(arg))
 		return
 	end
-	-- history, checked, timers, the objective and the vias are keyed by index: move them with the points
-	local cur = ns.db.current[route.name]
+	-- history, checked, timers, the objective and the vias are keyed by index: move them with the points. A
+	-- deleted current point hands over to the next one (Logic.remapIndex, wrapping to the first).
 	ns.remapRoute(route.name, L.removeMap(#route.points, n))
-	if cur == n then
-		ns.db.current[route.name] = math.min(n, #route.points - 1)
-	end
 	table.remove(route.points, n)
 	say("removed point " .. n .. "; " .. #route.points .. " left")
 	place()
