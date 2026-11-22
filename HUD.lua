@@ -28,7 +28,7 @@ local C = {
 }
 
 local SKILLUP_BAND = 25 -- "need within about 25 of skill"
-local NEAR_ALPHA, CLAMPED_ALPHA, WAITING_ALPHA = 0.35, 0.75, 0.6
+local NEAR_ALPHA, CLAMPED_ALPHA, WAITING_ALPHA, PATH_ALPHA = 0.35, 0.75, 0.6, 0.8
 
 -- ---------------------------------------------------------------------------------------------------------
 -- Helpers
@@ -80,10 +80,15 @@ end
 --             short stem points down at the chest.
 --   route:    a dark diamond with a thin tier-coloured rim, the number in the tier colour.
 --   waiting:  a small grey hollow diamond, no number.
+--   path:     a 10 px parchment ring, no number: a point to walk through, not a chest. It is round and
+--             carries no tier colour so it is never read as the diamond; the label says which chest is next.
 -- The yards (and the "7/14" label, dimmer) sit above, away from the chest below.
 -- ---------------------------------------------------------------------------------------------------------
 local QUARTER = math.pi / 4
 local RIM, CORE_ROUTE, CORE_WAITING, RIM_WAITING = 20, 17, 9, 12
+local DOT_RIM, DOT_CORE = 10, 6
+local READOUT_GAP, READOUT_GAP_PATH = 3, -6 -- the ring is small: pull the yards down to it
+local CIRCLE = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 
 local function diamond(parent, sub, size)
 	local t = solid(parent, "ARTWORK", sub)
@@ -93,13 +98,43 @@ local function diamond(parent, sub, size)
 	return t
 end
 
+-- A disc: a square under a circle mask. Without mask support it stays a small upright square, which
+-- still isn't a diamond.
+local function disc(parent, sub, size)
+	local t = solid(parent, "ARTWORK", sub)
+	t:SetSize(size, size)
+	t:SetPoint("CENTER")
+	pcall(function()
+		local mask = parent:CreateMaskTexture()
+		mask:SetTexture(CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+		mask:SetAllPoints(t)
+		t:AddMaskTexture(mask)
+	end)
+	t:Hide()
+	return t
+end
+
 local function markerApply(self, info)
 	info = info or {}
 	local state = info.state or "route"
 	local c = C[HUD.tier(info.need, info.skill)]
-	local detected, waiting = state == "detected", state == "waiting"
+	local detected, waiting, path = state == "detected", state == "waiting", state == "path"
 
-	if waiting then
+	-- the ring has its own two textures, so the diamond's sizes and tints are never touched by it
+	self.rim:SetShown(not path)
+	self.core:SetShown(not path)
+	self.number:SetShown(not path)
+	self.dotRim:SetShown(path)
+	self.dotCore:SetShown(path)
+	if self.readoutGap ~= (path and READOUT_GAP_PATH or READOUT_GAP) then
+		self.readoutGap = path and READOUT_GAP_PATH or READOUT_GAP
+		self.readout:ClearAllPoints()
+		self.readout:SetPoint("BOTTOM", self, "TOP", 0, self.readoutGap)
+	end
+
+	if path then
+		self.number:SetText("")
+	elseif waiting then
 		self.rim:SetSize(RIM_WAITING, RIM_WAITING)
 		self.core:SetSize(CORE_WAITING, CORE_WAITING)
 		tint(self.rim, C.idle)
@@ -147,6 +182,8 @@ local function markerApply(self, info)
 		alpha = WAITING_ALPHA
 	elseif info.clamped then
 		alpha = CLAMPED_ALPHA
+	elseif path then
+		alpha = PATH_ALPHA
 	end
 	self:SetAlpha(alpha)
 end
@@ -162,6 +199,11 @@ function HUD.buildMarker(parent)
 	m.rim = diamond(m, 0, RIM)
 	m.core = diamond(m, 1, CORE_ROUTE)
 
+	m.dotRim = disc(m, 0, DOT_RIM)
+	tint(m.dotRim, C.text)
+	m.dotCore = disc(m, 1, DOT_CORE)
+	tint(m.dotCore, C.ink, 0.9)
+
 	m.stem = solid(m, "ARTWORK", 0)
 	m.stem:SetSize(2, 9)
 	m.stem:SetPoint("TOP", m, "BOTTOM", 0, -1)
@@ -170,7 +212,8 @@ function HUD.buildMarker(parent)
 	m.number = label(m, "GameFontNormalSmall", 10)
 	m.number:SetPoint("CENTER", 0, 0)
 	m.readout = label(m, "GameFontHighlightSmall", 10)
-	m.readout:SetPoint("BOTTOM", m, "TOP", 0, 3)
+	m.readoutGap = READOUT_GAP
+	m.readout:SetPoint("BOTTOM", m, "TOP", 0, READOUT_GAP)
 	m.readout:SetTextColor(C.text[1], C.text[2], C.text[3])
 
 	-- The ring that leaves the diamond while a chest is detected. Without animations the fill still says it.

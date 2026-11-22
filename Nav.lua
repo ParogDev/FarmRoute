@@ -63,6 +63,29 @@ function Nav.playerPos()
 	return mapID, x, y
 end
 
+-- The player's world position: continentID, x, y, mapID, map x, map y; or nil and why. Not cached (it moves).
+function Nav.playerWorld()
+	local pm, px, py = Nav.playerPos()
+	if not pm then
+		return nil, px
+	end
+	local c, x, y = Nav.worldPos(pm, px, py)
+	worldCache[pm .. ":" .. px .. ":" .. py] = nil
+	if not c then
+		return nil, x
+	end
+	return c, x, y, pm, px, py
+end
+
+-- A world position as map fractions on mapID: x, y; or nil and why.
+function Nav.mapPos(mapID, continent, wx, wy)
+	local ok, _, pos = pcall(C_Map.GetMapPosFromWorldPos, continent, CreateVector2D(wx, wy), mapID)
+	if not ok or not pos then
+		return nil, "map " .. tostring(mapID) .. " has no position for that world point"
+	end
+	return pos.x, pos.y
+end
+
 -- Yards from the player to a point, or nil and why. Height is not known, so floors share a distance.
 function Nav.distanceTo(p)
 	local pm, px, py = Nav.playerPos()
