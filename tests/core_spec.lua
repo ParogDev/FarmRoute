@@ -111,6 +111,14 @@ describe("FarmRoute core", function()
 		assert.is_true(ns.interactState().ok)
 	end)
 
+	it("counts gamepad-only (1) as off, as Plater set it in game", function()
+		mock.login(nil)
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.is_false(ns.interactState().ok)
+		assert.matches("gamepad only.*turned off by Plater", mock.chat[#mock.chat])
+	end)
+
 	it("fixinteract waits for combat to end", function()
 		mock.login(nil)
 		mock.cvars.SoftTargetInteract = "0"

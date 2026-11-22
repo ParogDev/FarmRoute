@@ -269,7 +269,6 @@ function Nav.updateScreenLine(lineEnabled, radius)
 	if anchoredTo ~= navFrame then
 		marker:ClearAllPoints()
 		marker:SetPoint("BOTTOM", navFrame, "CENTER", 0, MARKER_LIFT)
-		line:SetEndPoint("CENTER", marker, 0, 0)
 		anchoredTo = navFrame
 	end
 	local clamped = C_Navigation.WasClampedToScreen()
@@ -283,10 +282,24 @@ function Nav.updateScreenLine(lineEnabled, radius)
 	local near = d and radius and d <= radius * 1.5
 	marker:SetAlpha(near and 0.45 or (clamped and 0.7 or 1))
 	marker:Show()
+	Nav.marker.shown, Nav.marker.why, Nav.marker.clamped = true, "shown", clamped
+	-- A line may not anchor to the marker ("Not allowed to depend on Frame"): place its end at the marker's
+	-- screen position instead, and never let the line stop the marker.
+	local placed = false
 	if lineEnabled and not clamped and not near then
+		local ok, x, y = pcall(marker.GetCenter, marker)
+		if ok and x and y and not issecretvalue(x) and not issecretvalue(y) then
+			placed = pcall(line.SetEndPoint, line, "BOTTOMLEFT", UIParent, x, y)
+			Nav.marker.line = placed and "shown" or "SetEndPoint refused"
+		else
+			Nav.marker.line = "marker position not readable"
+		end
+	else
+		Nav.marker.line = "off, clamped or near"
+	end
+	if placed then
 		lineFrame:Show()
 	else
 		lineFrame:Hide()
 	end
-	Nav.marker.shown, Nav.marker.why, Nav.marker.clamped = true, "shown", clamped
 end

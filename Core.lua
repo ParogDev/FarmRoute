@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.4"
+ns.VERSION = "0.1.5"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -541,7 +541,12 @@ function ns.interactState()
 	if v == nil then
 		return { ok = false, value = "nil", why = INTERACT .. " not readable" }
 	end
-	return { ok = v ~= "0", value = v, why = v == "0" and "Interact key is off: chest detection can't work" or nil }
+	-- 0 off, 1 gamepad only, 2 keyboard and mouse, 3 always: only 3 gives keyboard soft-interact (as Lueur needs)
+	if v == INTERACT_ON then
+		return { ok = true, value = v }
+	end
+	local what = v == "1" and "set to gamepad only" or (v == "0" and "off" or ("set to " .. v))
+	return { ok = false, value = v, why = "Interact key is " .. what .. ": chest detection can't work" }
 end
 
 -- The addon folder of the first stack frame outside FarmRoute and Blizzard's CVar code.
@@ -572,7 +577,8 @@ function ns.checkInteract(source)
 	if not interactWarned then
 		interactWarned = true
 		local last = ns.db.interactLog[#ns.db.interactLog]
-		local who = last and last.value == "0" and (" (turned off by " .. last.by .. " at " .. last.at .. ")") or ""
+		local who = last and last.value ~= INTERACT_ON and (" (turned off by " .. last.by .. " at " .. last.at .. ")")
+			or ""
 		say("|cffff4040" .. st.why .. who .. ".|r Type /fr fixinteract to turn it on. [" .. source .. "]")
 	end
 	return st
