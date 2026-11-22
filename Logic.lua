@@ -265,6 +265,121 @@ function L.parseRequires(texts, pattern)
 	return nil
 end
 
+-- ---------------------------------------------------------------------------------------------------------
+-- Objective: which spawn to check next. A loop checks every point once; a point is checked when the player
+-- reached it (chest looted or nothing there) or skipped it. History keeps, per point, whether a chest was
+-- there on each visit; a "cold" point (empty on its last COLD_VISITS visits) is passed over while warm points
+-- are left, and checked again once it has been passed over COLD_REST loops.
+-- ---------------------------------------------------------------------------------------------------------
+L.HISTORY_MAX = 12
+L.COLD_VISITS = 3
+L.COLD_REST = 2
+
+-- Object ids of the seed routes' chests (Wowhead Forever object pages).
+L.SEED_OBJECTS = {
+	["Angor Battered"] = { [179490] = true },
+	["Angor Dented"] = { [179492] = true },
+}
+
+-- Does a soft-interact target belong to this route? A route with an object list takes those ids only; one
+-- without takes anything whose tooltip asks for a skill (a locked chest).
+function L.matchesRoute(route, objectID, need)
+	if type(route.objects) == "table" and next(route.objects) then
+		return objectID ~= nil and route.objects[objectID] == true
+	end
+	return need ~= nil
+end
+
+function L.recordVisit(hist, i, seen, now)
+	local h = hist[i] or { visits = {} }
+	hist[i] = h
+	L.push(h.visits, { t = now, seen = seen and true or false }, L.HISTORY_MAX)
+	if seen then
+		h.lastSeen = now
+		h.rested = nil
+	end
+	return h
+end
+
+function L.isCold(hist, i)
+	local h = hist and hist[i]
+	if not h or #h.visits < L.COLD_VISITS then
+		return false
+	end
+	for k = #h.visits - L.COLD_VISITS + 1, #h.visits do
+		if h.visits[k].seen then
+			return false
+		end
+	end
+	return (h.rested or 0) < L.COLD_REST
+end
+
+-- Seen / visits for a point, for /fr list and the selftest.
+function L.seenRate(hist, i)
+	local h = hist and hist[i]
+	if not h then
+		return 0, 0
+	end
+	local seen = 0
+	for _, v in ipairs(h.visits) do
+		if v.seen then
+			seen = seen + 1
+		end
+	end
+	return seen, #h.visits
+end
+
+-- The next point after `from` (forward, wrapping) that is up, not checked this loop and not cold. Returns the
+-- index and why: "next", "cold" (only cold points were left: the first cold one), or nil, "loop done".
+function L.objective(route, timers, checked, hist, from, now)
+	local n = #route.points
+	if n == 0 then
+		return nil, "empty route"
+	end
+	from = from or 0
+	local firstCold
+	for k = 1, n do
+		local i = L.wrap(from + k, n)
+		if not checked[i] and L.isUp(timers, i, now) then
+			if not L.isCold(hist, i) then
+				return i, "next"
+			end
+			firstCold = firstCold or i
+		end
+	end
+	if firstCold then
+		return firstCold, "cold"
+	end
+	return nil, "loop done"
+end
+
+-- A new loop: cold points that were passed over get one rest counted; the checked set empties.
+function L.newLoop(route, checked, hist)
+	for i = 1, #route.points do
+		if not checked[i] and L.isCold(hist, i) then
+			local h = hist[i]
+			h.rested = (h.rested or 0) + 1
+		elseif checked[i] and hist[i] and (hist[i].rested or 0) >= L.COLD_REST then
+			hist[i].rested = nil
+		end
+	end
+	for k in pairs(checked) do
+		checked[k] = nil
+	end
+end
+
+-- The route point nearest to (x, y) in world yards within maxYd; points is a list of { i, x, y }.
+function L.nearestIndex(points, x, y, maxYd)
+	local best, bestD
+	for _, p in ipairs(points) do
+		local d = L.distance(x, y, p.x, p.y)
+		if d <= maxYd and (not bestD or d < bestD) then
+			best, bestD = p.i, d
+		end
+	end
+	return best, bestD
+end
+
 -- Appends to a list kept at most max long (oldest dropped).
 function L.push(list, item, max)
 	list[#list + 1] = item

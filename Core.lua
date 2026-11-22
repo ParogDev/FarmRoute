@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.2.0-probe"
+ns.VERSION = "0.2.0"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -20,9 +20,28 @@ local DEFAULTS = {
 	minimapDots = true,
 	keepInteract = true,
 	probe = true,
+	followChests = true, -- a detected chest of the route becomes the objective
+	suggestSkip = false, -- near a point with nothing detected for a while: say so
+	autoSkip = false, -- ... and move on
+	skipAfter = 15, -- seconds near a point with nothing detected
 }
 
-local counters = { advanceArrived = 0, advanceKey = 0, advanceNavReached = 0, imports = 0, placeFailed = 0 }
+local SETTLE = 0.75 -- seconds at a point before "nothing here" counts (the soft target can appear late)
+local LOST_AFTER = 1.5 -- seconds without the chest before it counts as gone (looted, or out of range)
+local NEAR_YD = 20 -- "near a point" for the skip options
+
+local counters = {
+	advanceArrived = 0,
+	advanceKey = 0,
+	advanceNavReached = 0,
+	advanceLooted = 0,
+	skipKey = 0,
+	autoSkip = 0,
+	chestJump = 0,
+	chestNoPoint = 0,
+	imports = 0,
+	placeFailed = 0,
+}
 local selftest = {}
 ns.selftest = selftest
 ns.counters = counters
@@ -40,6 +59,9 @@ function ns.initDB(saved)
 	db.timers = db.timers or {}
 	db.settings = db.settings or {}
 	db.interactLog = db.interactLog or {}
+	db.history = db.history or {} -- [route][point] = { visits = { { t, seen } }, lastSeen, rested }
+	db.checked = db.checked or {} -- [route][point] = true: checked this loop
+	db.objectNeed = db.objectNeed or {} -- [objectID] = minimum skill, read from the tooltip
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then
 			db.settings[k] = v
@@ -53,6 +75,16 @@ function ns.initDB(saved)
 		end
 		db.active = db.active or "Angor Battered"
 		db.seeded = true
+	end
+	-- the seed routes take only their own chest kind (0.1.x saved them without the list)
+	for name, objects in pairs(L.SEED_OBJECTS) do
+		local r = db.routes[name]
+		if r and r.objects == nil then
+			r.objects = {}
+			for id in pairs(objects) do
+				r.objects[id] = true
+			end
+		end
 	end
 	-- never switched off: walking (a fresh install shows the pin, not a stopped status line)
 	if db.running == nil then
@@ -135,8 +167,29 @@ local function setCurrent(i)
 	place()
 end
 
--- dir +1 / -1; why names the counter.
-function ns.advance(dir, why)
+function ns.historyFor(name)
+	ns.db.history[name] = ns.db.history[name] or {}
+	return ns.db.history[name]
+end
+
+function ns.checkedFor(name)
+	ns.db.checked[name] = ns.db.checked[name] or {}
+	return ns.db.checked[name]
+end
+
+-- The chest the game is soft-targeting, once matched to the route: { key, point, objectID, lastSeen }
+local chest
+local seenThisLoop = {} -- [point] = true: a chest of the route was detected there this loop
+local arrivedAt, nearSince, skipSuggested
+
+local function resetPointState()
+	arrivedAt, nearSince, skipSuggested = nil, nil, false
+end
+
+-- dir +1 / -1; why names the counter. Forward checks the current point (seen: true / false records a visit
+-- in the history, nil records none, as for a skip) and goes to the objective: the next point not checked this
+-- loop. Back steps one point and checks nothing.
+function ns.advance(dir, why, seen)
 	local route = ns.activeRoute()
 	if not route or #route.points == 0 then
 		say("no route or an empty route: /fr route, /fr add")
@@ -144,8 +197,36 @@ function ns.advance(dir, why)
 	end
 	local now = time()
 	local timers = ns.timersFor(route.name)
-	local i, waiting = L.advance(route, timers, ns.currentIndex(), dir, now)
+	local cur = ns.currentIndex()
 	counters[why] = (counters[why] or 0) + 1
+	resetPointState()
+	if chest and chest.point == cur then
+		chest = nil
+	end
+	if dir < 0 then
+		setCurrent((L.nextIndex(route, timers, cur, -1, now)))
+		return
+	end
+	local m = L.respawnOf(route, cur)
+	if m > 0 then
+		timers[cur] = now + m * 60
+	end
+	local checked, hist = ns.checkedFor(route.name), ns.historyFor(route.name)
+	checked[cur] = true
+	if seen ~= nil then
+		L.recordVisit(hist, cur, seen, now)
+	end
+	local i, objWhy = L.objective(route, timers, checked, hist, cur, now)
+	if not i then
+		L.newLoop(route, checked, hist)
+		seenThisLoop = {}
+		i, objWhy = L.objective(route, timers, checked, hist, cur, now)
+	end
+	local waiting = false
+	if not i then
+		i, waiting = L.nextIndex(route, timers, cur, 1, now)
+	end
+	ns.objectiveWhy = waiting and "waiting" or objWhy
 	setCurrent(i)
 	if waiting then
 		say(
@@ -172,25 +253,188 @@ function FarmRoute.Prev()
 	ns.advance(-1, "advanceKey")
 end
 
+-- Skip keybind: the current point counts as checked (no history entry) and the objective moves on.
+function FarmRoute.Skip()
+	if not running then
+		ns.start()
+	end
+	local route, i = ns.activeRoute(), ns.currentIndex()
+	ns.advance(1, "skipKey")
+	if route and i and ns.HUD and ns.HUD.flash then
+		ns.guard("flash", ns.HUD.flash, "Skipped " .. i .. "/" .. #route.points)
+	end
+end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Chests: a soft-interact target of the route's kind becomes the objective (the route point nearest the
+-- player, inside detection range), and stays it until it is gone: looted at the point (a visit with a chest),
+-- or lost from further away (the point stays the objective; arriving there later counts it as seen).
+-- ---------------------------------------------------------------------------------------------------------
+local skillCache = { at = -10 }
+
+-- The player's rank in the skill the route's chests need (named by their tooltip), refreshed every 5 s.
+function ns.skillRank()
+	if GetTime() - skillCache.at > 5 then
+		skillCache.at = GetTime()
+		skillCache.rank = ns.Detect.skillRank(skillCache.name or "Lockpicking")
+	end
+	return skillCache.rank
+end
+
+-- The minimum skill of the route's chest kind, from the tooltip of one seen before.
+function ns.routeNeed(route)
+	if chest and chest.need then
+		return chest.need
+	end
+	for id in pairs(route.objects or {}) do
+		if ns.db.objectNeed[id] then
+			return ns.db.objectNeed[id]
+		end
+	end
+	return nil
+end
+
+-- Detection range in yards: the soft-interact range CVar plus a margin for the point's own error.
+local function detectYards()
+	local ok, v = pcall(C_CVar.GetCVar, "SoftTargetInteractRange")
+	return (ok and tonumber(v) or 10) + 5
+end
+
+local function nearestPoint(route)
+	local pm, px, py = Nav.playerPos()
+	if not pm then
+		return nil
+	end
+	local c, x, y = Nav.worldPos(pm, px, py)
+	if not c then
+		return nil
+	end
+	local list = {}
+	for i, p in ipairs(route.points) do
+		local pc, wx, wy = Nav.worldPos(p.mapID, p.x, p.y)
+		if pc == c then
+			list[#list + 1] = { i = i, x = wx, y = wy }
+		end
+	end
+	return L.nearestIndex(list, x, y, detectYards())
+end
+
+local function chestTick(route, cur)
+	local t = ns.Detect.current
+	local match = t and L.matchesRoute(route, t.objectID, t.need)
+	local now = GetTime()
+	if match then
+		if t.need then
+			skillCache.name = t.need.skill
+			if t.objectID then
+				ns.db.objectNeed[t.objectID] = t.need.level
+			end
+		end
+		local key = t.guid or t.name or "secret"
+		if not chest or chest.key ~= key then
+			local p = nearestPoint(route)
+			if not p then
+				counters.chestNoPoint = counters.chestNoPoint + 1
+				ns.chestWhy = "chest detected but no route point within " .. detectYards() .. " yd"
+				return
+			end
+			chest = { key = key, point = p, objectID = t.objectID, need = t.need and t.need.level }
+			seenThisLoop[p] = true
+			ns.chestWhy = "chest at point " .. p
+			if p ~= cur and ns.db.settings.followChests then
+				counters.chestJump = counters.chestJump + 1
+				resetPointState()
+				setCurrent(p)
+				say(string.format("chest detected: %s", L.formatPoint(route, p)))
+			end
+		end
+		chest.lastSeen = now
+	elseif chest and now - chest.lastSeen > LOST_AFTER then
+		local d = Nav.distanceTo(route.points[chest.point])
+		local atPoint = chest.point == cur and d and d <= ns.db.settings.radius * 2
+		chest = nil
+		ns.chestWhy = atPoint and "chest gone at the point (looted)" or "chest out of range"
+		if atPoint then
+			ns.advance(1, "advanceLooted", true)
+		end
+	end
+end
+
+-- At the current point (inside the radius): a chest there waits for its loot; nothing there for SETTLE
+-- seconds checks the point (seen this loop from afar: a chest, else empty). Near it with nothing detected for
+-- skipAfter seconds: suggest a skip, or skip (both options off by default).
+local function arrivalTick(route, i, d)
+	local now = GetTime()
+	local s = ns.db.settings
+	if d <= s.radius and now - lastAdvance >= MIN_GAP and L.isUp(ns.timersFor(route.name), i, time()) then
+		nearSince = nil
+		if chest and chest.point == i then
+			return
+		end
+		arrivedAt = arrivedAt or now
+		if s.autoAdvance and now - arrivedAt >= SETTLE then
+			ns.advance(1, "advanceArrived", seenThisLoop[i] == true)
+		end
+		return
+	end
+	arrivedAt = nil
+	if d > NEAR_YD or chest or not (s.suggestSkip or s.autoSkip) then
+		nearSince = nil
+		return
+	end
+	nearSince = nearSince or now
+	if now - nearSince < s.skipAfter then
+		return
+	end
+	if s.autoSkip then
+		ns.advance(1, "autoSkip", false)
+		say("nothing detected near " .. L.formatPoint(route, i) .. ": moved on")
+	elseif not skipSuggested then
+		skipSuggested = true
+		if ns.HUD and ns.HUD.flash then
+			ns.guard("flash", ns.HUD.flash, "Nothing here? Skip key")
+		end
+		say("nothing detected near " .. L.formatPoint(route, i) .. "; the Skip key moves on")
+	end
+end
+
+-- What the marker shows: see HUD.buildMarker.
+function ns.markerInfo()
+	local route, i = ns.activeRoute(), ns.currentIndex()
+	if not route or not i then
+		return {}
+	end
+	local state = "route"
+	if chest and chest.point == i then
+		state = "detected"
+	elseif ns.objectiveWhy == "waiting" then
+		state = "waiting"
+	end
+	return { state = state, need = ns.routeNeed(route), skill = ns.skillRank(), label = i .. "/" .. #route.points }
+end
+
 local function tick()
 	ns.guard("detect", ns.Detect.tick)
+	if ns.updateHealth then
+		ns.guard("health", ns.updateHealth)
+	end
 	if not running then
 		Nav.hideMarker("stopped")
 		return
 	end
-	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius)
 	local route, i = ns.activeRoute(), ns.currentIndex()
+	if route and i then
+		ns.guard("chest", chestTick, route, i)
+		i = ns.currentIndex()
+	end
+	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius, ns.markerInfo())
 	if not route or not i then
 		return
 	end
 	local d, why = Nav.distanceTo(route.points[i])
 	lastDistance, lastDistanceWhy = d, why
-	if not d or not ns.db.settings.autoAdvance then
-		return
-	end
-	local timers = ns.timersFor(route.name)
-	if d <= ns.db.settings.radius and GetTime() - lastAdvance >= MIN_GAP and L.isUp(timers, i, time()) then
-		ns.advance(1, "advanceArrived")
+	if d then
+		arrivalTick(route, i, d)
 	end
 end
 
@@ -203,6 +447,7 @@ end
 function ns.stop()
 	running = false
 	ns.db.running = false
+	ns.restoreCVars()
 	Nav.clear()
 	Nav.hideMarker("stopped")
 	MapLines.refresh()
@@ -260,6 +505,20 @@ function selftest.snapshot(phase)
 		interact = ns.interactState(),
 		interactLast = ns.db.interactLog and ns.db.interactLog[#ns.db.interactLog] or nil,
 		detect = ns.Detect.selftest(),
+		objective = {
+			why = ns.objectiveWhy,
+			chest = chest and { point = chest.point, objectID = chest.objectID, need = chest.need } or nil,
+			chestWhy = ns.chestWhy,
+			marker = ns.markerInfo(),
+			checked = route and (function()
+				local n = 0
+				for _ in pairs(ns.checkedFor(route.name)) do
+					n = n + 1
+				end
+				return n
+			end)() or 0,
+		},
+		health = ns.healthState(),
 		lastError = selftest.lastError,
 	}
 	return ns.db.selftest
@@ -288,6 +547,8 @@ local HELP = {
 	"/fr mode pin|tomtom - Blizzard's in-world pin or TomTom's arrow; /fr line on|off; /fr map on|off; /fr minimap on|off",
 	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on; /fr keepinteract on|off - keep it on",
 	"/fr probe [on|off] - what soft-interact has measured (chat line per change when on)",
+	"/fr follow on|off - a detected chest becomes the objective; /fr suggestskip | autoskip on|off - near a point with nothing detected",
+	"/fr restorecvars - put back your soft-target settings (also done by /fr off); Skip keybind: Options > Keybindings",
 }
 
 local function onOff(v)
@@ -433,9 +694,13 @@ function commands.list()
 		return
 	end
 	local timers, now = ns.timersFor(route.name), time()
+	local checked, hist = ns.checkedFor(route.name), ns.historyFor(route.name)
 	for i = 1, #route.points do
 		local t = timers[i] and timers[i] > now and string.format(" [up in %d s]", timers[i] - now) or ""
-		say((i == ns.currentIndex() and "> " or "  ") .. L.formatPoint(route, i) .. t)
+		local seen, visits = L.seenRate(hist, i)
+		local h = visits > 0 and string.format(" chest %d/%d visits", seen, visits) or ""
+		local flags = (checked[i] and " checked" or "") .. (L.isCold(hist, i) and " cold" or "")
+		say((i == ns.currentIndex() and "> " or "  ") .. L.formatPoint(route, i) .. t .. h .. flags)
 	end
 end
 
@@ -536,6 +801,22 @@ function commands.probe(arg)
 	)
 end
 
+function commands.follow(arg)
+	toggle("followChests", arg, "follow detected chests")
+end
+
+function commands.suggestskip(arg)
+	toggle("suggestSkip", arg, "suggest a skip when nothing is detected")
+end
+
+function commands.autoskip(arg)
+	toggle("autoSkip", arg, "skip when nothing is detected")
+end
+
+function commands.skip()
+	FarmRoute.Skip()
+end
+
 function commands.minimap(arg)
 	toggle("minimapDots", arg, "minimap route")
 end
@@ -618,7 +899,7 @@ local REASSERT_MAX, REASSERT_WINDOW = 3, 10 -- more than 3 put-backs in 10 s: an
 -- /fr keepinteract on: put the key back to 3 whenever something changes it, outside combat. Stops and says
 -- so when another addon keeps changing it back, instead of looping.
 local function reassert(st)
-	if not ns.db.settings.keepInteract or InCombatLockdown() then
+	if not running or not ns.db.settings.keepInteract or InCombatLockdown() then
 		return false
 	end
 	local now = GetTime()
@@ -648,7 +929,7 @@ end
 
 function ns.checkInteract(source)
 	local st = ns.interactState()
-	if st.ok then
+	if st.ok or not running then
 		interactWarned = false
 		return st
 	end
@@ -689,21 +970,146 @@ function ns.hookInteract()
 				{ value = value, by = selfSet and "FarmRoute (/fr fixinteract)" or callerAddon(), at = GetTime() }
 		end
 	end)
+	-- Blizzard's gamepad code sets the key through temporary CVars (Blizzard_GamepadTargeting/TargetLogic.lua)
+	if C_CVar.SetTempCVar then
+		hooksecurefunc(C_CVar, "SetTempCVar", function(name, value)
+			if name == INTERACT then
+				lastLuaSet = { value = value, by = callerAddon() .. " (temporary CVar)", at = GetTime() }
+			end
+		end)
+	end
+end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Detection health: what soft-interact detection needs, shown on screen with a Fix button (HUD.lua). The
+-- player's own values are saved before the first fix and put back by /fr off and /fr restorecvars.
+-- ---------------------------------------------------------------------------------------------------------
+local MIN_RANGE, FIX_RANGE = 15, 20
+local health -- the last state shown
+
+local function cvar(name)
+	local ok, v = pcall(C_CVar.GetCVar, name)
+	return ok and v or nil
+end
+
+function ns.healthState()
+	local st = ns.interactState()
+	if not st.ok then
+		local last = ns.db.interactLog[#ns.db.interactLog]
+		local detail = last and last.value ~= INTERACT_ON and ("turned off by " .. last.by .. " at " .. last.at) or nil
+		local line = st.value == "1" and "Interact key is gamepad only: detection disabled"
+			or "Interact key is off: detection disabled"
+		return { ok = false, line = line, detail = detail, key = "interact" .. st.value }
+	end
+	if cvar("SoftTargetInteractOnlyInRange") == "1" then
+		return {
+			ok = false,
+			line = "Detection only within interact range",
+			detail = "SoftTargetInteractOnlyInRange is 1",
+			key = "onlyInRange",
+		}
+	end
+	local range = tonumber(cvar("SoftTargetInteractRange"))
+	if range and range < MIN_RANGE then
+		return {
+			ok = false,
+			line = string.format("Detection range is only %d yd", range),
+			detail = "SoftTargetInteractRange; Fix sets " .. FIX_RANGE,
+			key = "range" .. range,
+		}
+	end
+	return { ok = true, key = "ok" }
+end
+
+-- Called every tick; draws only on a change.
+function ns.updateHealth()
+	-- stopped: FarmRoute needs nothing, and /fr off has just put the player's own values back
+	local h = running and ns.healthState() or { ok = true, key = "stopped" }
+	h.canFix = not h.ok
+	h.fixBlocked = InCombatLockdown() and "in combat" or nil
+	local key = h.key .. tostring(h.fixBlocked)
+	if health and health.shownKey == key then
+		return
+	end
+	h.shownKey = key
+	health = h
+	if ns.healthFrame then
+		ns.healthFrame:Apply(h)
+	end
+end
+
+local function setOwn(name, value)
+	if ns.db.savedCVars[name] == nil then
+		ns.db.savedCVars[name] = cvar(name) or false
+	end
+	selfSet = true
+	local ok, err = pcall(C_CVar.SetCVar, name, tostring(value))
+	selfSet = false
+	return ok, err
+end
+
+-- The Fix button and /fr fixinteract: the key on, detection beyond interact range, a usable range.
+function ns.fixDetection()
+	if InCombatLockdown() then
+		say("in combat: detection can be fixed after combat")
+		return false
+	end
+	ns.db.savedCVars = ns.db.savedCVars or {}
+	local ok, err = setOwn(INTERACT, INTERACT_ON)
+	if cvar("SoftTargetInteractOnlyInRange") == "1" then
+		setOwn("SoftTargetInteractOnlyInRange", 0)
+	end
+	local range = tonumber(cvar("SoftTargetInteractRange"))
+	if range and range < MIN_RANGE then
+		setOwn("SoftTargetInteractRange", FIX_RANGE)
+	end
+	local h = ns.healthState()
+	if ok and h.ok then
+		say(
+			"detection on ("
+				.. INTERACT
+				.. " = "
+				.. cvar(INTERACT)
+				.. ", range "
+				.. tostring(cvar("SoftTargetInteractRange"))
+				.. ")"
+		)
+	else
+		say("couldn't fix detection: " .. tostring(err or h.line))
+	end
+	ns.updateHealth()
+	return h.ok
+end
+
+-- Puts back the values the player had before the first fix.
+function ns.restoreCVars(quiet)
+	local saved = ns.db.savedCVars
+	if not saved or not next(saved) then
+		return false
+	end
+	if InCombatLockdown() then
+		say("in combat: your soft-target settings are put back after combat (/fr restorecvars)")
+		return false
+	end
+	for name, value in pairs(saved) do
+		if value ~= false then
+			pcall(C_CVar.SetCVar, name, value)
+		end
+	end
+	ns.db.savedCVars = nil
+	if not quiet then
+		say("your soft-target settings are back as they were")
+	end
+	return true
 end
 
 function commands.fixinteract()
-	if InCombatLockdown() then
-		say("in combat: try /fr fixinteract again after combat")
-		return
-	end
-	selfSet = true
-	local ok, err = pcall(C_CVar.SetCVar, INTERACT, INTERACT_ON)
-	selfSet = false
-	local st = ns.interactState()
-	if ok and st.ok then
-		say("Interact key on (" .. INTERACT .. " = " .. st.value .. ")")
-	else
-		say("couldn't turn the interact key on: " .. tostring(err or st.why))
+	ns.fixDetection()
+end
+
+function commands.restorecvars()
+	if not ns.restoreCVars() then
+		say("nothing to put back")
 	end
 end
 
@@ -719,6 +1125,7 @@ end
 BINDING_HEADER_FARMROUTE = "FarmRoute"
 BINDING_NAME_FARMROUTE_NEXT = "Next point"
 BINDING_NAME_FARMROUTE_PREV = "Previous point"
+BINDING_NAME_FARMROUTE_SKIP = "Skip this point"
 
 -- ---------------------------------------------------------------------------------------------------------
 -- Events
@@ -751,6 +1158,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		selftest.loadedAt = date("%Y-%m-%d %H:%M:%S")
 		L.pruneTimers(ns.timersFor(ns.db.active or ""), time())
 		guard("screenLine", Nav.initScreenLine)
+		guard("healthFrame", function()
+			ns.healthFrame = ns.HUD.buildHealth(UIParent)
+		end)
 		guard("mapLines", MapLines.initWorld)
 		running = ns.db.running == true
 		guard("place", place)

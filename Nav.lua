@@ -233,6 +233,17 @@ function Nav.initScreenLine()
 		end
 	end)
 
+	-- HUD.lua draws the phase 2 marker (minimum skill, coloured by the player's skill); the plain icon below
+	-- stays as the fallback when it can't be built.
+	local okHud, built = pcall(function()
+		return ns.HUD and ns.HUD.buildMarker and ns.HUD.buildMarker(UIParent)
+	end)
+	if okHud and built then
+		marker = built
+		Nav.marker.why = "built (HUD)"
+		return
+	end
+	Nav.marker.hudError = not okHud and tostring(built) or nil
 	marker = CreateFrame("Frame", nil, UIParent)
 	marker:SetSize(22, 22)
 	marker:SetFrameStrata("LOW")
@@ -260,8 +271,9 @@ function Nav.hideMarker(why)
 	end
 end
 
--- Called from the ticker. lineEnabled: the /fr line setting; radius: the arrival radius (fade inside 1.5x).
-function Nav.updateScreenLine(lineEnabled, radius)
+-- Called from the ticker. lineEnabled: the /fr line setting; radius: the arrival radius (fade inside 1.5x);
+-- info: what the marker shows (Core's ns.markerInfo: state, need, skill, label).
+function Nav.updateScreenLine(lineEnabled, radius, info)
 	if not lineFrame then
 		return
 	end
@@ -285,14 +297,20 @@ function Nav.updateScreenLine(lineEnabled, radius)
 	end
 	local clamped = C_Navigation.WasClampedToScreen()
 	local d = C_Navigation.GetDistance()
-	if d and not issecretvalue(d) then
-		marker.text:SetText(string.format("%d yd", d + 0.5))
-	else
-		marker.text:SetText("")
+	if not d or issecretvalue(d) then
 		d = nil
 	end
 	local near = d and radius and d <= radius * 1.5
-	marker:SetAlpha(near and 0.45 or (clamped and 0.7 or 1))
+	if marker.Apply then
+		info = info or {}
+		info.distance, info.near, info.clamped = d, near and true or false, clamped
+		local ok, err = pcall(marker.Apply, marker, info)
+		Nav.marker.applyError = not ok and tostring(err) or nil
+		Nav.marker.state = info.state
+	else
+		marker.text:SetText(d and string.format("%d yd", d + 0.5) or "")
+		marker:SetAlpha(near and 0.45 or (clamped and 0.7 or 1))
+	end
 	marker:Show()
 	Nav.marker.shown, Nav.marker.why, Nav.marker.clamped = true, "shown", clamped
 	-- A line may not anchor to the marker ("Not allowed to depend on Frame"): place its end at the marker's

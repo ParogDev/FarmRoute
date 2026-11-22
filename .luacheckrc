@@ -36,6 +36,7 @@ end
 globals = {
 	"FarmRoute", "FarmRouteDB", "SLASH_FARMROUTE1", "SLASH_FARMROUTE2", "SlashCmdList",
 	"BINDING_HEADER_FARMROUTE", "BINDING_NAME_FARMROUTE_NEXT", "BINDING_NAME_FARMROUTE_PREV",
+	"BINDING_NAME_FARMROUTE_SKIP",
 }
 
 files["tests/"] = { std = "+busted", globals = { "FarmRoute", "FarmRouteDB", "_G" } }

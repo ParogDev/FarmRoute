@@ -22,6 +22,9 @@ local function widget(w)
 	function w:GetText()
 		return self._text or ""
 	end
+	function w:GetStringWidth()
+		return 100
+	end
 	return w
 end
 widgetMeta.__index = function(_, k)
