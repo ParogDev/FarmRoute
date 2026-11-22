@@ -426,7 +426,8 @@ end
 -- empty on its last DROP_VISITS visits leaves the loop once the route has confirmed points. Points added by
 -- hand (p.manual) are never dropped. Geometry here is in world yards: callers convert map positions.
 -- ---------------------------------------------------------------------------------------------------------
-L.MERGE_YD = 4 -- a find this close to a confirmed point is the same spawn
+L.MERGE_YD = 8 -- a find this close to a confirmed point is the same spawn (looted from any side of it)
+L.FIND_MAX_YD = 60 -- a find further than this from every point of a route belongs to another place
 L.SEED_YD = 15 -- seed coordinates were measured up to 14 yd off the real spawn
 L.DROP_VISITS = 6
 L.LEARN_STEP = 3 -- yards between two path samples
@@ -493,10 +494,11 @@ end
 -- SEED_YD: its coordinate is replaced), or "new", pos (insert at route index pos, the cheapest place in the
 -- loop).
 function L.findTarget(route, list, x, y)
-	local mi, md, ui, ud
+	local mi, md, ui, ud, nearest
 	for _, e in ipairs(list) do
 		local p = route.points[e.i]
 		local d = L.distance(x, y, e.x, e.y)
+		nearest = math.min(nearest or d, d)
 		if L.isConfirmed(p) and d <= L.MERGE_YD and (not md or d < md) then
 			mi, md = e.i, d
 		elseif L.isUnconfirmed(p) and d <= L.SEED_YD and (not ud or d < ud) then
@@ -508,6 +510,9 @@ function L.findTarget(route, list, x, y)
 	end
 	if ui then
 		return "confirm", ui, ud
+	end
+	if #list > 0 and nearest > L.FIND_MAX_YD then
+		return "far", nil, nearest
 	end
 	return "new", L.insertionIndex(list, x, y)
 end
@@ -551,6 +556,16 @@ function L.insertMap(n, at)
 	local map = {}
 	for i = 1, n do
 		map[i] = i < at and i or i + 1
+	end
+	return map
+end
+
+function L.removeMap(n, at)
+	local map = {}
+	for i = 1, n do
+		if i ~= at then
+			map[i] = i < at and i or i - 1
+		end
 	end
 	return map
 end

@@ -221,8 +221,11 @@ local function viaTick(route, i)
 	local d, dn, vn = {}, {}, {}
 	for k = via.at, #via.list do
 		local p = route.points[via.list[k]]
-		local vc, vx, vy = Nav.worldPos(p.mapID, p.x, p.y)
-		if vc ~= c then
+		local vc, vx, vy
+		if p then
+			vc, vx, vy = Nav.worldPos(p.mapID, p.x, p.y)
+		end
+		if not p or vc ~= c then
 			break
 		end
 		-- the point after via k: the next via, else the chest
@@ -482,7 +485,9 @@ function ns.recordFind(objectID)
 			local list = routeYards(route, c)
 			local action, i, d = L.findTarget(route, list, wx, wy)
 			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
-			if action == "new" then
+			if action == "far" or #list == 0 then -- luacheck: ignore 542
+				-- the same chest kind somewhere else: not this route's
+			elseif action == "new" then
 				local floor = route.points[1] and route.points[1].floor
 				local p = { mapID = mapID, x = mx, y = my, label = "Learned", floor = floor, finds = 1 }
 				ns.remapRoute(name, L.insertMap(#route.points, i))
@@ -490,18 +495,22 @@ function ns.recordFind(objectID)
 			else
 				L.mergeFind(route.points[i], mx, my)
 			end
-			done = { route = name, objectID = objectID, action = action, point = i, yd = d and math.floor(d + 0.5) }
-			done.at = date("%Y-%m-%d %H:%M:%S")
-			L.push(ns.db.finds, done, FINDS_MAX)
-			local what = action == "new" and "new spawn" or (action == "confirm" and "seed confirmed") or "spawn"
-			say(string.format("%s learned: %s", what, L.formatPoint(route, i)))
-			-- the looted chest is this point now: the loot logic and history follow it
-			if name == ns.db.active and chest then
-				if ns.db.current[name] == chest.point then
-					ns.db.current[name] = i
+			if i then
+				done = { route = name, objectID = objectID, action = action, point = i }
+				done.yd, done.at = d and math.floor(d + 0.5), date("%Y-%m-%d %H:%M:%S")
+				L.push(ns.db.finds, done, FINDS_MAX)
+				local what = action == "new" and "new spawn" or (action == "confirm" and "seed confirmed") or "spawn"
+				say(string.format("%s learned: %s", what, L.formatPoint(route, i)))
+				-- the looted chest is this point now: the loot logic and history follow it
+				if name == ns.db.active then
+					seenThisLoop[i] = true
+					if chest then
+						if ns.db.current[name] == chest.point then
+							ns.db.current[name] = i
+						end
+						chest.point = i
+					end
 				end
-				chest.point = i
-				seenThisLoop[i] = true
 			end
 		end
 	end
@@ -868,6 +877,10 @@ local function learnCommand(arg)
 	end
 	local lr = ns.db.learn[route.name]
 	if arg == "on" then
+		if lr and (lr.recording or lr.plan) then
+			say(lr.recording and "already recording" or "a walk waits: /fr learn accept or discard first")
+			return
+		end
 		ns.db.learn[route.name] = { recording = true, samples = {}, startedAt = date("%Y-%m-%d %H:%M:%S") }
 		say("learning " .. route.name .. ": walk the loop, loot as usual, then /fr learn off")
 	elseif arg == "off" then
@@ -1059,12 +1072,13 @@ function commands.del(arg)
 		say("no point " .. tostring(arg))
 		return
 	end
-	table.remove(route.points, n)
-	ns.db.timers[route.name] = {}
-	local cur = ns.currentIndex()
-	if cur and cur > n then
-		ns.db.current[route.name] = cur - 1
+	-- history, checked, timers, the objective and the vias are keyed by index: move them with the points
+	local cur = ns.db.current[route.name]
+	ns.remapRoute(route.name, L.removeMap(#route.points, n))
+	if cur == n then
+		ns.db.current[route.name] = math.min(n, #route.points - 1)
 	end
+	table.remove(route.points, n)
 	say("removed point " .. n .. "; " .. #route.points .. " left")
 	place()
 end

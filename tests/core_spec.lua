@@ -427,7 +427,13 @@ describe("FarmRoute core", function()
 		mock.fire("LOOT_OPENED")
 		assert.equals(1, #FarmRouteDB.finds)
 		FarmRouteDB.history["Angor Battered"] = { [14] = { visits = { { t = 1, seen = true } } } }
+		-- the same chest kind far from the route (another place): not learned
 		mock.pos = { 0.30, 0.30 }
+		mock.loot = { "GameObject-0-1-2-3-179490-0002" }
+		mock.fire("LOOT_OPENED")
+		assert.equals(1, #FarmRouteDB.finds)
+		-- 25 yd west and north of point 1, 40+ yd from every other point: a new spawn
+		mock.pos = { 0.408 - 25 / mock.YARDS, 0.267 - 25 / mock.YARDS }
 		mock.loot = { "GameObject-0-1-2-3-179490-0001" }
 		mock.fire("LOOT_OPENED")
 		assert.equals("new", FarmRouteDB.finds[2].action)
