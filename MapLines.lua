@@ -178,18 +178,24 @@ local function drawLearn(shown, w, h, scale)
 		M.status.learn = view and ("trail is on map " .. tostring(view.mapID)) or "not learning"
 		return
 	end
-	local samples = view.samples or {}
-	local n = #samples
+	local runs = view.runs or {}
+	local n = 0
+	for _, run in ipairs(runs) do
+		n = n + #run
+	end
 	local ti, mi, ki = 0, 0, 0
 	local alpha = view.recording and TEAL[4] or 0.45 -- a finished walk steps back a little
 	local step = math.max(1, math.ceil((n - 1) / TRAIL_MAX))
-	local i = 1
-	while i < n do
-		local j = math.min(i + step, n)
-		local a, b = samples[i], samples[j]
-		ti = ti + 1
-		stroke(trail, ti, "ARTWORK", TEAL, alpha, 1.5 / scale, a.x * w, -a.y * h, b.x * w, -b.y * h)
-		i = j
+	-- each run is its own line: nothing is drawn across a gap in the walk
+	for _, samples in ipairs(runs) do
+		local i = 1
+		while i < #samples do
+			local j = math.min(i + step, #samples)
+			local a, b = samples[i], samples[j]
+			ti = ti + 1
+			stroke(trail, ti, "ARTWORK", TEAL, alpha, 1.5 / scale, a.x * w, -a.y * h, b.x * w, -b.y * h)
+			i = j
+		end
 	end
 	for _, v in ipairs(view.visits or {}) do
 		mi = mi + 1
@@ -201,10 +207,10 @@ local function drawLearn(shown, w, h, scale)
 		ki = ki + 1
 		place(markCores, ki, 4, INK, INK[4], 4 / scale, s.x * w, -s.y * h, false)
 	end
-	if view.recording and n > 0 then
+	if view.recording and view.head then
 		-- the head of the trail: where the recording is now
 		mi = mi + 1
-		place(marks, mi, 4, TEAL, 1, 5 / scale, samples[n].x * w, -samples[n].y * h, false)
+		place(marks, mi, 4, TEAL, 1, 5 / scale, view.head.x * w, -view.head.y * h, false)
 	end
 	hideFrom(trail, ti + 1)
 	hideFrom(marks, mi + 1)

@@ -174,3 +174,84 @@ describe("learning a walk", function()
 		assert.is_true(map[4] > 2)
 	end)
 end)
+
+describe("0.3.1 fixes", function()
+	it("the stored stop moves past a path point and a dropped seed (history counts)", function()
+		local r = route({ { 0, 0, finds = 1 }, { 10, 0, kind = "path" }, { 20, 0 }, { 30, 0, finds = 2 } })
+		local hist = { [3] = emptyVisits(L.DROP_VISITS) }
+		assert.equals(4, L.currentStop(r, 2, hist)) -- path point -> skips the dropped seed at 3
+		assert.equals(3, L.currentStop(r, 2, {})) -- without history, 3 is a stop
+		assert.equals(4, L.currentStop(r, 3, hist)) -- a dropped seed stored as current moves on
+		assert.equals(1, L.currentStop(r, 9, hist)) -- gone: point 1
+		assert.is_nil(L.currentStop(route({}), 1, {}))
+	end)
+
+	it("a removed current point hands over to the next surviving one, wrapping", function()
+		local map = L.removeMap(5, 3)
+		assert.equals(3, L.remapIndex(3, map)) -- old 4 is now 3
+		assert.equals(1, L.remapIndex(5, L.removeMap(5, 5))) -- last point gone: wraps to the first
+		assert.equals(2, L.remapIndex(2, map))
+		assert.equals(5, L.remapIndex(4, L.insertMap(5, 2)))
+		assert.is_nil(L.remapIndex(1, {}))
+		assert.is_nil(L.remapIndex(nil, map))
+	end)
+
+	it("the learn trail breaks where the walk left the map or jumped", function()
+		local samples = {
+			{ mapID = 1, x = 0.1, y = 0.1, wx = 0, wy = 0 },
+			{ mapID = 1, x = 0.2, y = 0.1, wx = 3, wy = 0 },
+			{ mapID = 2, x = 0.5, y = 0.5, wx = 6, wy = 0 }, -- another map
+			{ mapID = 1, x = 0.3, y = 0.1, wx = 9, wy = 0 },
+			{ mapID = 1, x = 0.4, y = 0.1, wx = 12, wy = 0, gap = true }, -- sampling paused before it
+			{ mapID = 1, x = 0.5, y = 0.1, wx = 15, wy = 0 },
+			{ mapID = 1, x = 0.9, y = 0.1, wx = 80, wy = 0 }, -- a jump
+		}
+		local runs = L.trailRuns(samples, 1)
+		assert.equals(4, #runs)
+		assert.equals(2, #runs[1])
+		assert.equals(1, #runs[2])
+		assert.equals(2, #runs[3])
+		assert.equals(0.9, runs[4][1].x)
+		assert.same({}, L.trailRuns(samples, 3))
+	end)
+
+	it("accept keeps the old path points of a stretch the walk didn't go straight along", function()
+		-- old loop: A, p1, B, p2, C, p3. The walk goes A -> B straight (new via), the rest not straight.
+		local entries = {
+			{ i = 1, x = 0, y = 0, point = { name = "A" } },
+			{ i = 2, x = 5, y = 5, point = { name = "p1", kind = "path" } },
+			{ i = 3, x = 10, y = 0, point = { name = "B" } },
+			{ i = 4, x = 15, y = 5, point = { name = "p2", kind = "path" } },
+			{ i = 5, x = 20, y = 0, point = { name = "C" } },
+			{ i = 6, x = 10, y = -5, point = { name = "p3", kind = "path" } },
+		}
+		local plan = { order = { 1, 3, 5 }, vias = { [1] = { { x = 5, y = 1 } } } }
+		local makeVia = function(s)
+			return { name = "via", kind = "path", x = s.x, y = s.y }
+		end
+		local points, map, kept = L.applyPlan(entries, plan, makeVia)
+		local names = {}
+		for k, p in ipairs(points) do
+			names[k] = p.name
+		end
+		-- A -> B walked: p1 replaced by the new via; B -> C and C -> A not walked: p2 and p3 kept
+		assert.same({ "A", "via", "B", "p2", "C", "p3" }, names)
+		assert.equals(2, kept)
+		assert.is_nil(map[2])
+		assert.equals(4, map[4])
+		assert.equals(6, map[6])
+		-- a stretch walked straight with no corner (empty vias) still replaces the old ones
+		plan.vias[2] = {}
+		points, map, kept = L.applyPlan(entries, plan, makeVia)
+		assert.equals(5, #points)
+		assert.equals(1, kept)
+		assert.is_nil(map[4])
+	end)
+
+	it("a point added by hand shows unconfirmed until a loot lands on it", function()
+		local r = route({ { 0, 0, manual = true }, { 30, 0, manual = true, finds = 1 } })
+		assert.equals("unconfirmed", L.pointStatus(r, {}, 1))
+		assert.equals("chest", L.pointStatus(r, {}, 2))
+		assert.is_true(L.inLoop(r, { [1] = emptyVisits(10) }, 1)) -- and still never drops
+	end)
+end)

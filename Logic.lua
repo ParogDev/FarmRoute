@@ -433,6 +433,7 @@ L.DROP_VISITS = 6
 L.LEARN_STEP = 3 -- yards between two path samples
 L.LEARN_TOLERANCE = 3 -- Douglas-Peucker tolerance, yards
 L.VISIT_YD = 6 -- a walk passes a chest point inside this
+L.TRAIL_GAP_YD = 25 -- two learn samples further apart than this were not walked in between
 
 function L.isPath(p)
 	return p ~= nil and p.kind == "path"
@@ -477,7 +478,8 @@ function L.inLoop(route, hist, i)
 	return p ~= nil and not L.isPath(p) and not L.isDropped(route, hist, i)
 end
 
--- "chest" | "unconfirmed" | "dropped" | "path", for the maps and /fr list.
+-- "chest" | "unconfirmed" | "dropped" | "path", for the maps and /fr list. Only a real loot makes a chest:
+-- a point added by hand with no find yet is unconfirmed too (it just never drops).
 function L.pointStatus(route, hist, i)
 	local p = route.points[i]
 	if L.isPath(p) then
@@ -486,7 +488,22 @@ function L.pointStatus(route, hist, i)
 	if L.isDropped(route, hist, i) then
 		return "dropped"
 	end
-	return L.isUnconfirmed(p) and "unconfirmed" or "chest"
+	return L.isConfirmed(p) and "chest" or "unconfirmed"
+end
+
+-- The stop the pin is at, from the stored index i: 1 when i is gone, and a path point stored there (an edited
+-- route) moves on to the next chest still in the loop (hist: dropped seeds are skipped too).
+function L.currentStop(route, i, hist)
+	if #route.points == 0 then
+		return nil
+	end
+	if not i or not route.points[i] then
+		i = 1
+	end
+	if L.isPath(route.points[i]) or not L.inLoop(route, hist, i) then
+		return L.nextIndex(route, {}, i, 1, 0, hist) or i
+	end
+	return i
 end
 
 -- Where a find (a looted chest at x, y) goes. list: { { i, x, y } } in yards, one entry per route point.
@@ -584,6 +601,30 @@ function L.remap(t, map)
 	return out
 end
 
+-- Where a stored index goes under an old -> new map: its own new index, or, when that point is gone, the
+-- new index of the first surviving point after it in the old loop. nil only when nothing survives.
+function L.remapIndex(i, map)
+	if not i then
+		return nil
+	end
+	if map[i] then
+		return map[i]
+	end
+	local n = i
+	for k in pairs(map) do
+		if type(k) == "number" and k > n then
+			n = k
+		end
+	end
+	for k = 1, n - 1 do
+		local nk = map[L.wrap(i + k, n)]
+		if nk then
+			return nk
+		end
+	end
+	return nil
+end
+
 -- Path points between chest `from` and chest `to` going forward: the vias of that stretch.
 function L.viasBetween(route, from, to)
 	local out, n = {}, #route.points
@@ -623,6 +664,28 @@ end
 -- Path sampling: a new sample once the player is `step` yards from the last one.
 function L.shouldSample(last, x, y, step)
 	return not last or L.distance(last.x, last.y, x, y) >= (step or L.LEARN_STEP)
+end
+
+-- The learn trail on map mapID as unbroken runs of { x, y } map positions. A run ends where the walk left the
+-- map or sampling paused (a sample with gap = true, one on another map, or a jump over TRAIL_GAP_YD between
+-- world positions wx, wy), so no straight line is drawn across ground nobody walked.
+function L.trailRuns(samples, mapID, gapYd)
+	gapYd = gapYd or L.TRAIL_GAP_YD
+	local runs, run, last = {}, nil, nil
+	for _, s in ipairs(samples) do
+		if s.mapID ~= mapID then
+			run = nil
+		else
+			local jump = last and s.wx and last.wx and L.distance(last.wx, last.wy, s.wx, s.wy) > gapYd
+			if not run or s.gap or jump then
+				run = {}
+				runs[#runs + 1] = run
+			end
+			run[#run + 1] = { x = s.x, y = s.y }
+		end
+		last = s
+	end
+	return runs
 end
 
 local function segmentDistance(p, a, b)
@@ -761,14 +824,34 @@ end
 
 -- The new point list for an accepted plan. entries: { { i, x, y, point } } for every route point (yards);
 -- makeVia(sample) builds a path point. Walked chests come in walking order with their vias; chests the walk
--- missed are put back at their cheapest place; old path points are replaced. Returns points and the
--- old -> new index map.
+-- missed are put back at their cheapest place. A stretch the walk went straight along gets the new vias; one
+-- it didn't keeps the old path points that ran between the same two chests. Returns points, the old -> new
+-- index map and how many old path points were kept.
 function L.applyPlan(entries, plan, makeVia)
-	local byIndex = {}
-	for _, e in ipairs(entries) do
+	local byIndex, pos = {}, {}
+	for k, e in ipairs(entries) do
 		byIndex[e.i] = e
+		pos[e.i] = k
 	end
-	local out, map, placed = {}, {}, {}
+	-- the old path entries straight after chest a, when the next chest in the old loop is b
+	local function oldVias(a, b)
+		local list, n = {}, #entries
+		for k = 1, n do
+			local e = entries[(pos[a] - 1 + k) % n + 1]
+			if not L.isPath(e.point) then
+				return e.i == b and list or {}
+			end
+			list[#list + 1] = e
+		end
+		return {}
+	end
+	local walked = function(k)
+		if k < #plan.order then
+			return plan.vias[k] ~= nil
+		end
+		return plan.closing ~= nil
+	end
+	local out, map, placed, kept = {}, {}, {}, 0
 	local chestPos = {} -- { i = new index, x, y } of chests in out, for the insertion of missed ones
 	for k, ci in ipairs(plan.order) do
 		local e = byIndex[ci]
@@ -776,8 +859,16 @@ function L.applyPlan(entries, plan, makeVia)
 			out[#out + 1] = e.point
 			map[ci] = #out
 			placed[ci] = true
-			for _, s in ipairs(L.planVias(plan, k)) do
-				out[#out + 1] = makeVia(s)
+			if walked(k) then
+				for _, s in ipairs(L.planVias(plan, k)) do
+					out[#out + 1] = makeVia(s)
+				end
+			else
+				for _, v in ipairs(oldVias(ci, plan.order[k % #plan.order + 1])) do
+					out[#out + 1] = v.point
+					map[v.i] = #out
+					kept = kept + 1
+				end
 			end
 			-- i is the last index of the chest's stretch, so a missed chest goes in after its vias
 			chestPos[#chestPos + 1] = { i = #out, x = e.x, y = e.y }
@@ -804,5 +895,5 @@ function L.applyPlan(entries, plan, makeVia)
 			end)
 		end
 	end
-	return out, map
+	return out, map, kept
 end
