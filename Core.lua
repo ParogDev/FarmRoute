@@ -218,16 +218,25 @@ local function viaTick(route, i)
 	if not c or tc ~= c then
 		return
 	end
-	local d, vt = {}, {}
+	local d, dn, vn = {}, {}, {}
 	for k = via.at, #via.list do
 		local p = route.points[via.list[k]]
 		local vc, vx, vy = Nav.worldPos(p.mapID, p.x, p.y)
 		if vc ~= c then
 			break
 		end
-		d[k], vt[k] = L.distance(x, y, vx, vy), L.distance(vx, vy, tx, ty)
+		-- the point after via k: the next via, else the chest
+		local q = via.list[k + 1] and route.points[via.list[k + 1]]
+		local nc, nx, ny = tc, tx, ty
+		if q then
+			nc, nx, ny = Nav.worldPos(q.mapID, q.x, q.y)
+		end
+		d[k] = L.distance(x, y, vx, vy)
+		if nc == c then
+			dn[k], vn[k] = L.distance(x, y, nx, ny), L.distance(vx, vy, nx, ny)
+		end
 	end
-	local at = L.nextVia(via.at, d, L.distance(x, y, tx, ty), vt, ns.db.settings.radius)
+	local at = L.nextVia(via.at, d, dn, vn, ns.db.settings.radius)
 	if at ~= via.at then
 		via.at = at
 		place()
@@ -428,10 +437,18 @@ function ns.remapRoute(name, map)
 	if via.route == name then
 		via = { list = {}, at = 1 }
 	end
+	-- a learn plan waiting for accept names chests by index too (a point is only ever inserted meanwhile)
+	local plan = db.learn[name] and db.learn[name].plan
+	if plan then
+		for k, i in ipairs(plan.order) do
+			plan.order[k] = map[i] or i
+		end
+	end
 end
 
 -- The game object id of what the open loot window came from (first slot with a GameObject source), or nil
--- and why.
+-- and why. The same chest opened again (loot left in it) is no new find.
+local lastLootGuid
 local function lootObject()
 	local n = GetNumLootItems and GetNumLootItems() or 0
 	for slot = 1, n do
@@ -442,6 +459,10 @@ local function lootObject()
 			end
 			local id = L.guidObject(guid)
 			if id then
+				if guid == lastLootGuid then
+					return nil, "same chest opened again"
+				end
+				lastLootGuid = guid
 				return id
 			end
 		end
@@ -484,13 +505,6 @@ function ns.recordFind(objectID)
 			end
 		end
 	end
-	if ns.db.learn[ns.db.active or ""] and done then
-		local lr = ns.db.learn[ns.db.active]
-		if lr.recording then
-			lr.finds = lr.finds or {}
-			lr.finds[#lr.finds + 1] = #lr.samples
-		end
-	end
 	if done then
 		place()
 		MapLines.refresh()
@@ -504,8 +518,10 @@ function ns.onLootOpened()
 	if chest and GetTime() - (chest.lastSeen or 0) <= LOST_AFTER * 2 then
 		chest.lootedAt = GetTime()
 	end
-	local id, why = lootObject()
-	ns.lastFind = id and ns.recordFind(id) or { why = why }
+	ns.guard("recordFind", function()
+		local id, why = lootObject()
+		ns.lastFind = id and ns.recordFind(id) or { why = why }
+	end)
 end
 
 local function chestTick(route, cur)
@@ -617,7 +633,14 @@ local lastLearnDraw = 0
 
 local function learnTick(route)
 	local lr = ns.db.learn[route.name]
-	if not lr or not lr.recording or #lr.samples >= SAMPLES_MAX then
+	if not lr or not lr.recording then
+		return
+	end
+	if #lr.samples >= SAMPLES_MAX then
+		if not lr.full then
+			lr.full = true
+			say("learn walk is full (" .. SAMPLES_MAX .. " samples): /fr learn off")
+		end
 		return
 	end
 	local c, wx, wy, pm, px, py = Nav.playerWorld()
@@ -857,7 +880,7 @@ local function learnCommand(arg)
 		local plan = L.learnPlan(samples, chests)
 		plan.suggestions = {}
 		for k = 1, #plan.order do
-			for _, s in ipairs((k < #plan.order and plan.vias[k] or plan.closing) or {}) do
+			for _, s in ipairs(L.planVias(plan, k)) do
 				plan.suggestions[#plan.suggestions + 1] = s
 			end
 		end
@@ -1585,10 +1608,14 @@ frame:SetScript("OnEvent", function(_, event, ...)
 	elseif event == "NAVIGATION_DESTINATION_REACHED" then
 		-- Blizzard clears a reached user waypoint in its own handler; move on after it has run.
 		if running and Nav.ownsPin() and ns.db.settings.autoAdvance then
+			local reached = ns.pinIndex()
 			C_Timer.After(0, function()
-				-- a reached via only moves the pin on; the chest is checked by the arrival logic
-				if ns.pinIndex() ~= ns.currentIndex() then
-					via.at = via.at + 1
+				-- a reached via only moves the pin on (if the tick hasn't already); the chest is checked by the
+				-- arrival logic
+				if reached ~= ns.currentIndex() then
+					if ns.pinIndex() == reached and via.list[via.at] == reached then
+						via.at = via.at + 1
+					end
 					guard("place", place)
 				elseif GetTime() - lastAdvance >= MIN_GAP then
 					guard("navReached", ns.advance, 1, "advanceNavReached")

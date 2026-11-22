@@ -458,8 +458,16 @@ function L.isDropped(route, hist, i)
 	if not L.isUnconfirmed(route.points[i]) then
 		return false
 	end
-	local seen, visits = L.seenRate(hist, i)
-	return seen == 0 and visits >= L.DROP_VISITS and hasConfirmed(route)
+	local h = hist and hist[i]
+	if not h or #h.visits < L.DROP_VISITS then
+		return false
+	end
+	for k = #h.visits - L.DROP_VISITS + 1, #h.visits do
+		if h.visits[k].seen then
+			return false
+		end
+	end
+	return hasConfirmed(route)
 end
 
 -- Is point i a stop of the loop (a chest point not dropped)?
@@ -561,11 +569,15 @@ end
 -- Path points between chest `from` and chest `to` going forward: the vias of that stretch.
 function L.viasBetween(route, from, to)
 	local out, n = {}, #route.points
-	if not from or not to or from == to or n == 0 then
+	if not from or not to or n == 0 then
 		return out
 	end
+	-- from == to: a one-chest loop walks every path point back to it
 	local i = L.wrap(from + 1, n)
-	while i ~= to and i ~= from do
+	for _ = 1, n - 1 do
+		if i == to then
+			break
+		end
 		if L.isPath(route.points[i]) then
 			out[#out + 1] = i
 		end
@@ -574,13 +586,14 @@ function L.viasBetween(route, from, to)
 	return out
 end
 
--- The via the pin should be at: from `at`, pass every via the player is inside the radius of, or already
--- closer to the target than the via is. d[k]: player to via k; dt: player to target; vt[k]: via k to target.
--- Returns the new position; #d + 1 means the target itself.
-function L.nextVia(at, d, dt, vt, radius)
+-- The via the pin should be at: from `at`, pass every via the player is inside the radius of, or has walked
+-- past (near it, and closer to the point after it than the via is). Far from a via nothing passes it, so a
+-- detour around a wall is never cut short. d[k]: player to via k; dn[k]: player to the point after via k;
+-- vn[k]: via k to that point. Returns the new position; #d + 1 means the target itself.
+function L.nextVia(at, d, dn, vn, radius)
 	local k = at
 	while d[k] do
-		if d[k] <= radius or (dt and vt[k] and dt < vt[k]) then
+		if d[k] <= radius or (d[k] <= radius * 3 and dn[k] and vn[k] and dn[k] < vn[k]) then
 			k = k + 1
 		else
 			break
@@ -716,6 +729,18 @@ function L.learnPlan(samples, chests, tol)
 	return plan
 end
 
+-- The vias after order[k]: the stretch to order[k + 1], or the closing one after the last chest. A stretch
+-- not walked straight has none.
+function L.planVias(plan, k)
+	local v
+	if k < #plan.order then
+		v = plan.vias[k]
+	else
+		v = plan.closing
+	end
+	return v or {}
+end
+
 -- The new point list for an accepted plan. entries: { { i, x, y, point } } for every route point (yards);
 -- makeVia(sample) builds a path point. Walked chests come in walking order with their vias; chests the walk
 -- missed are put back at their cheapest place; old path points are replaced. Returns points and the
@@ -733,8 +758,7 @@ function L.applyPlan(entries, plan, makeVia)
 			out[#out + 1] = e.point
 			map[ci] = #out
 			placed[ci] = true
-			local vias = (k < #plan.order) and plan.vias[k] or plan.closing
-			for _, s in ipairs(vias or {}) do
+			for _, s in ipairs(L.planVias(plan, k)) do
 				out[#out + 1] = makeVia(s)
 			end
 			-- i is the last index of the chest's stretch, so a missed chest goes in after its vias

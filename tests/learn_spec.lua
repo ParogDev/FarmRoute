@@ -87,11 +87,30 @@ describe("vias", function()
 		local r = route({ { 0, 0 }, { 5, 0, kind = "path" }, { 10, 0, kind = "path" }, { 20, 0 } })
 		assert.same({ 2, 3 }, L.viasBetween(r, 1, 4))
 		assert.same({}, L.viasBetween(r, 4, 1))
-		-- 1 yd from via 1 (inside the 3 yd radius), 6 yd from via 2: the pin goes to via 2
-		assert.equals(2, L.nextVia(1, { 1, 6 }, 16, { 15, 10 }, 3))
-		-- player already closer to the target than via 2 is: straight to the target
-		assert.equals(3, L.nextVia(1, { 9, 4 }, 6, { 15, 10 }, 3))
-		assert.equals(1, L.nextVia(1, { 9, 14 }, 24, { 15, 10 }, 3))
+		-- a one-chest loop walks all its path points
+		assert.same({ 2, 3 }, L.viasBetween(r, 1, 1))
+		-- 1 yd from via 1 (inside the 3 yd radius), 6 yd from via 2 and not past it: the pin goes to via 2
+		assert.equals(2, L.nextVia(1, { 1, 6 }, { 6, 12 }, { 5, 10 }, 3))
+		-- 7 yd past via 1 (closer to via 2 than via 1 is) and near it: passed
+		assert.equals(2, L.nextVia(1, { 7, 4 }, { 4, 12 }, { 5, 10 }, 3))
+		-- a detour via: the player is closer to the chest than the via, but far from it: not skipped
+		assert.equals(1, L.nextVia(1, { 15, 14 }, { 2, 12 }, { 5, 10 }, 3))
+	end)
+
+	it("a stretch not walked straight has no vias, even before the closing one", function()
+		local plan = { order = { 1, 2, 3 }, vias = { [2] = { "b" } }, closing = { "c" } }
+		assert.same({}, L.planVias(plan, 1))
+		assert.same({ "b" }, L.planVias(plan, 2))
+		assert.same({ "c" }, L.planVias(plan, 3))
+	end)
+
+	it("drops a seed only for its last visits being empty", function()
+		local r = route({ { 0, 0 }, { 30, 0, finds = 1 } })
+		local h = emptyVisits(L.DROP_VISITS)
+		table.insert(h.visits, 1, { t = 0, seen = true })
+		assert.is_true(L.isDropped(r, { [1] = h }, 1))
+		h.visits[#h.visits].seen = true
+		assert.is_false(L.isDropped(r, { [1] = h }, 1))
 	end)
 end)
 
