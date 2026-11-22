@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.2.2"
+ns.VERSION = "0.2.3"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -767,6 +767,10 @@ end
 
 function commands.keepinteract(arg)
 	toggle("keepInteract", arg, "keep the interact key on")
+	if ns.db.settings.keepInteract then
+		ns.resetReasserts()
+		ns.checkInteract("keepinteract on")
+	end
 end
 
 -- /fr probe on|off: a chat line per soft-interact change; /fr probe: what it has measured so far.
@@ -898,8 +902,19 @@ local REASSERT_MAX, REASSERT_WINDOW = 3, 10 -- more than 3 put-backs in 10 s: an
 
 -- /fr keepinteract on: put the key back to 3 whenever something changes it, outside combat. Stops and says
 -- so when another addon keeps changing it back, instead of looping.
+local pendingReassert = false -- a put-back skipped in combat, retried on PLAYER_REGEN_ENABLED
+
 local function reassert(st)
-	if not running or not ns.db.settings.keepInteract or InCombatLockdown() then
+	if not running or not ns.db.settings.keepInteract then
+		return false
+	end
+	local last = ns.db.interactLog[#ns.db.interactLog] -- the change being undone, read before ours is logged
+	-- the player's own change (Options > Controls, no Lua caller) is theirs to keep: only addon changes go back
+	if last and last.by == "client or settings panel" and last.value == st.value then
+		return false
+	end
+	if InCombatLockdown() then
+		pendingReassert = true
 		return false
 	end
 	local now = GetTime()
@@ -919,12 +934,28 @@ local function reassert(st)
 	end
 	reasserts[#reasserts + 1] = now
 	fightWarned = false
-	local last = ns.db.interactLog[#ns.db.interactLog] -- the change being undone, read before ours is logged
-	selfSet = true
-	pcall(C_CVar.SetCVar, INTERACT, INTERACT_ON)
+	selfSet = "FarmRoute (keepinteract)"
+	local ok, err = pcall(C_CVar.SetCVar, INTERACT, INTERACT_ON)
 	selfSet = false
-	say("interact key put back to 3 (was " .. st.value .. (last and (", set by " .. last.by) or "") .. ")")
+	if not ok then
+		say("couldn't put the interact key back: " .. tostring(err))
+		return false
+	end
+	-- name the culprit only when the last logged change is the one being undone
+	local by = last and last.value == st.value and (", set by " .. last.by) or ""
+	say("interact key put back to 3 (was " .. st.value .. by .. ")")
 	return ns.interactState().ok
+end
+
+function ns.resetReasserts()
+	reasserts, fightWarned = {}, false
+end
+
+function ns.onCombatEnd()
+	if pendingReassert then
+		pendingReassert = false
+		ns.checkInteract("after combat")
+	end
 end
 
 function ns.checkInteract(source)
@@ -966,8 +997,7 @@ function ns.hookInteract()
 	ns.db.interactLog = ns.db.interactLog or {}
 	hooksecurefunc(C_CVar, "SetCVar", function(name, value)
 		if name == INTERACT then
-			lastLuaSet =
-				{ value = value, by = selfSet and "FarmRoute (/fr fixinteract)" or callerAddon(), at = GetTime() }
+			lastLuaSet = { value = value, by = selfSet and tostring(selfSet) or callerAddon(), at = GetTime() }
 		end
 	end)
 	-- Blizzard's gamepad code sets the key through temporary CVars (Blizzard_GamepadTargeting/TargetLogic.lua)
@@ -1042,7 +1072,7 @@ local function setOwn(name, value)
 	if ns.db.savedCVars[name] == nil then
 		ns.db.savedCVars[name] = cvar(name) or false
 	end
-	selfSet = true
+	selfSet = "FarmRoute (/fr fixinteract)"
 	local ok, err = pcall(C_CVar.SetCVar, name, tostring(value))
 	selfSet = false
 	return ok, err
@@ -1139,6 +1169,7 @@ frame:RegisterEvent("NAVIGATION_DESTINATION_REACHED")
 frame:RegisterEvent("CVAR_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_SOFT_INTERACT_CHANGED")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
 		if ... == ADDON then
@@ -1169,6 +1200,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
 			guard("tick", tick)
 		end)
 		guard("snapshot", selftest.snapshot, "login")
+	elseif event == "PLAYER_REGEN_ENABLED" then
+		if ns.db then
+			guard("combatEnd", ns.onCombatEnd)
+		end
 	elseif event == "PLAYER_SOFT_INTERACT_CHANGED" then
 		if ns.db then
 			guard("softChanged", ns.Detect.update, "event")

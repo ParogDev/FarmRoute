@@ -241,6 +241,24 @@ describe("FarmRoute core", function()
 		assert.matches("keeps changing the interact key", table.concat(mock.chat, "\n"))
 	end)
 
+	it("keepinteract leaves the player's own change alone and retries after combat", function()
+		mock.login(nil)
+		-- Options > Controls: no Lua caller
+		mock.cvars.SoftTargetInteract = "0"
+		mock.fire("CVAR_UPDATE", "SoftTargetInteract", "0")
+		assert.equals("0", mock.cvars.SoftTargetInteract)
+		mock.cvars.SoftTargetInteract = "3"
+		-- an addon in combat: put back once combat ends
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		mock.combat = true
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.equals("1", mock.cvars.SoftTargetInteract)
+		mock.combat = false
+		mock.fire("PLAYER_REGEN_ENABLED")
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.equals("FarmRoute (keepinteract)", FarmRouteDB.interactLog[#FarmRouteDB.interactLog].by)
+	end)
+
 	it("warns when the interact key is off and names who turned it off", function()
 		mock.login(nil)
 		SlashCmdList.FARMROUTE("keepinteract off")

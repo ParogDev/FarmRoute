@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- `/fr keepinteract` leaves your own change in Options > Controls alone and only undoes addons. A put-back blocked by combat happens when combat ends. Its log entries now read "FarmRoute (keepinteract)".
+
 ## 0.2.2
 
 - Probe chat lines are only for chests of the active route, once per chest every 30 s. Chairs and stools that take the soft target stay in the saved log only.
