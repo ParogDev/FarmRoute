@@ -37,7 +37,8 @@ function Nav.worldPos(mapID, x, y)
 	if not continent or not vec then
 		return nil, "map " .. tostring(mapID) .. " has no world position"
 	end
-	local wx, wy = vec:GetXY()
+	-- C API vectors may come back as plain { x, y } tables without the mixin: read the fields
+	local wx, wy = vec.x, vec.y
 	worldCache[key] = { continent, wx, wy }
 	return continent, wx, wy
 end
@@ -55,7 +56,7 @@ function Nav.playerPos()
 	if not pos then
 		return nil, "no player position on map " .. mapID .. " (instance?)"
 	end
-	local x, y = pos:GetXY()
+	local x, y = pos.x, pos.y
 	if issecretvalue(x) or issecretvalue(y) then
 		return nil, "player position is a secret value"
 	end
@@ -111,7 +112,7 @@ function Nav.ownsPin()
 	if not wp or wp.uiMapID ~= s.mapID then
 		return false
 	end
-	local x, y = wp.position:GetXY()
+	local x, y = wp.position.x, wp.position.y
 	return math.abs(x - s.x) < 1e-4 and math.abs(y - s.y) < 1e-4
 end
 

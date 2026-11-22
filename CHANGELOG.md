@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.1.2
+## 0.1.3
+
+- Fixed: an error on every tick that stopped arrival detection. Waypoint and map positions come back from the client as plain tables and are now read field by field.
 
 - FarmRoute draws its own in-world marker on the navigation anchor (`C_Navigation.GetFrame`), because Blizzard's navigation frame draws nothing on Forever. The marker sits above the point so it never covers the chest, shows the distance in yards, and fades when you are close.
 - A fresh install starts running. When the route is stopped, `/fr` says how to start it.

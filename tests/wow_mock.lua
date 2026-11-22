@@ -33,14 +33,9 @@ widgetMeta.__index = function(_, k)
 	return noop
 end
 
+-- Plain { x, y }, as the C API returns (a 0.1.1 tick called :GetXY() on a waypoint position and failed in game)
 local function vec(x, y)
-	return {
-		x = x,
-		y = y,
-		GetXY = function(self)
-			return self.x, self.y
-		end,
-	}
+	return { x = x, y = y }
 end
 
 -- Badlands-like map: 1 map unit = 3000 yards.

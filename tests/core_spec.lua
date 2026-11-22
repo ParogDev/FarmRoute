@@ -81,6 +81,7 @@ describe("FarmRoute core", function()
 	it("draws its own marker on the navigation frame, and names why when it can't", function()
 		mock.login(nil)
 		mock.tick()
+		assert.is_nil(ns.selftest.lastError) -- a tick raised every 0.25 s in 0.1.1
 		assert.equals("C_Navigation.GetFrame() is nil", ns.Nav.marker.why)
 		mock.navFrame, mock.navDistance = mock.widget(), 17.4
 		mock.tick()
@@ -115,11 +116,7 @@ describe("FarmRoute core", function()
 	it("off removes only its own waypoint", function()
 		mock.login(nil)
 		SlashCmdList.FARMROUTE("on")
-		mock.waypoint = { uiMapID = 1, position = {
-			GetXY = function()
-				return 0.1, 0.1
-			end,
-		} }
+		mock.waypoint = { uiMapID = 1, position = { x = 0.1, y = 0.1 } }
 		SlashCmdList.FARMROUTE("off")
 		assert.equals(1, mock.waypoint.uiMapID)
 	end)
