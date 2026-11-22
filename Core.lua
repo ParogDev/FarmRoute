@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.0"
+ns.VERSION = "0.1.1"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -50,6 +50,10 @@ function ns.initDB(saved)
 		end
 		db.active = db.active or "Angor Battered"
 		db.seeded = true
+	end
+	-- never switched off: walking (a fresh install shows the pin, not a stopped status line)
+	if db.running == nil then
+		db.running = true
 	end
 	db.selftest = db.selftest or {}
 	ns.db = db
@@ -298,6 +302,9 @@ local function status()
 			Nav.state.ok and (Nav.state.mode or "?") or tostring(Nav.state.why)
 		)
 	)
+	if not running then
+		say("/fr on starts the route; /fr help lists the commands")
+	end
 end
 
 local function toggle(key, arg, label)

@@ -13,6 +13,9 @@ describe("FarmRoute core", function()
 		assert.is_not_nil(FarmRouteDB.routes["Angor Battered"])
 		assert.equals("Angor Battered", FarmRouteDB.active)
 		assert.equals(8, FarmRouteDB.settings.radius)
+		-- a fresh install is running and has placed the pin
+		assert.is_true(FarmRouteDB.running)
+		assert.equals(1418, mock.waypoint.uiMapID)
 		local saved = FarmRouteDB
 		saved.routes["Angor Dented"] = nil
 		mock.install()
