@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.2.3"
+ns.VERSION = "0.2.4"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -160,8 +160,25 @@ local function place()
 	MapLines.refresh()
 end
 
+-- The chest the game is soft-targeting, once matched to the route: { key, point, objectID, lastSeen, lootedAt }
+local chest
+local seenThisLoop = {} -- [point] = true: a chest of the route was detected there this loop
+local seenRoute -- the route seenThisLoop and chest belong to
+local arrivedAt, nearSince, skipSuggested
+
+local function resetPointState()
+	arrivedAt, nearSince, skipSuggested = nil, nil, false
+end
+
+-- Every move of the objective starts the point's settle and skip clocks again; a route switch also forgets
+-- the chest and the points seen this loop, which belong to the other route.
 local function setCurrent(i)
 	local route = ns.activeRoute()
+	if seenRoute and seenRoute ~= route.name then
+		seenThisLoop, chest = {}, nil
+	end
+	seenRoute = route.name
+	resetPointState()
 	ns.db.current[route.name] = i
 	lastAdvance = GetTime()
 	place()
@@ -175,15 +192,6 @@ end
 function ns.checkedFor(name)
 	ns.db.checked[name] = ns.db.checked[name] or {}
 	return ns.db.checked[name]
-end
-
--- The chest the game is soft-targeting, once matched to the route: { key, point, objectID, lastSeen }
-local chest
-local seenThisLoop = {} -- [point] = true: a chest of the route was detected there this loop
-local arrivedAt, nearSince, skipSuggested
-
-local function resetPointState()
-	arrivedAt, nearSince, skipSuggested = nil, nil, false
 end
 
 -- dir +1 / -1; why names the counter. Forward checks the current point (seen: true / false records a visit
@@ -208,7 +216,8 @@ function ns.advance(dir, why, seen)
 		return
 	end
 	local m = L.respawnOf(route, cur)
-	if m > 0 then
+	-- a skip opened nothing: no respawn timer
+	if m > 0 and why ~= "skipKey" and why ~= "autoSkip" then
 		timers[cur] = now + m * 60
 	end
 	local checked, hist = ns.checkedFor(route.name), ns.historyFor(route.name)
@@ -260,7 +269,7 @@ function FarmRoute.Skip()
 	end
 	local route, i = ns.activeRoute(), ns.currentIndex()
 	ns.advance(1, "skipKey")
-	if route and i and ns.HUD and ns.HUD.flash then
+	if route and i and ns.currentIndex() ~= i and ns.HUD and ns.HUD.flash then
 		ns.guard("flash", ns.HUD.flash, "Skipped " .. i .. "/" .. #route.points)
 	end
 end
@@ -319,6 +328,13 @@ local function nearestPoint(route)
 	return L.nearestIndex(list, x, y, detectYards())
 end
 
+-- LOOT_OPENED while a chest of the route is the target, or was a moment ago: it is being opened.
+function ns.onLootOpened()
+	if chest and GetTime() - (chest.lastSeen or 0) <= LOST_AFTER * 2 then
+		chest.lootedAt = GetTime()
+	end
+end
+
 local function chestTick(route, cur)
 	local t = ns.Detect.current
 	local match = t and L.matchesRoute(route, t.objectID, t.need)
@@ -349,12 +365,14 @@ local function chestTick(route, cur)
 			end
 		end
 		chest.lastSeen = now
+		chest.need = t.need and t.need.level or chest.need -- the tooltip hook may fill it later
 	elseif chest and now - chest.lastSeen > LOST_AFTER then
 		local d = Nav.distanceTo(route.points[chest.point])
-		local atPoint = chest.point == cur and d and d <= ns.db.settings.radius * 2
+		-- looted only with LOOT_OPENED seen for it: a chair taking the soft target looks the same otherwise
+		local looted = chest.lootedAt and chest.point == cur and d and d <= ns.db.settings.radius * 2
 		chest = nil
-		ns.chestWhy = atPoint and "chest gone at the point (looted)" or "chest out of range"
-		if atPoint then
+		ns.chestWhy = looted and "chest looted at the point" or "chest no longer targeted"
+		if looted then
 			ns.advance(1, "advanceLooted", true)
 		end
 	end
@@ -373,7 +391,12 @@ local function arrivalTick(route, i, d)
 		end
 		arrivedAt = arrivedAt or now
 		if s.autoAdvance and now - arrivedAt >= SETTLE then
-			ns.advance(1, "advanceArrived", seenThisLoop[i] == true)
+			-- "empty" only when detection could work; otherwise no history entry (it would turn the point cold)
+			local seen = seenThisLoop[i] == true
+			if not seen and (InCombatLockdown() or not ns.healthState().ok) then
+				seen = nil
+			end
+			ns.advance(1, "advanceArrived", seen)
 		end
 		return
 	end
@@ -903,6 +926,7 @@ local REASSERT_MAX, REASSERT_WINDOW = 3, 10 -- more than 3 put-backs in 10 s: an
 -- /fr keepinteract on: put the key back to 3 whenever something changes it, outside combat. Stops and says
 -- so when another addon keeps changing it back, instead of looping.
 local pendingReassert = false -- a put-back skipped in combat, retried on PLAYER_REGEN_ENABLED
+local pendingRestore = false -- /fr off in combat: the player's soft-target values go back after it
 
 local function reassert(st)
 	if not running or not ns.db.settings.keepInteract then
@@ -952,6 +976,10 @@ function ns.resetReasserts()
 end
 
 function ns.onCombatEnd()
+	if pendingRestore then
+		pendingRestore = false
+		ns.restoreCVars()
+	end
 	if pendingReassert then
 		pendingReassert = false
 		ns.checkInteract("after combat")
@@ -1118,7 +1146,8 @@ function ns.restoreCVars(quiet)
 		return false
 	end
 	if InCombatLockdown() then
-		say("in combat: your soft-target settings are put back after combat (/fr restorecvars)")
+		pendingRestore = true
+		say("in combat: your soft-target settings are put back after combat")
 		return false
 	end
 	for name, value in pairs(saved) do
@@ -1170,6 +1199,7 @@ frame:RegisterEvent("CVAR_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_SOFT_INTERACT_CHANGED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+frame:RegisterEvent("LOOT_OPENED")
 frame:SetScript("OnEvent", function(_, event, ...)
 	if event == "ADDON_LOADED" then
 		if ... == ADDON then
@@ -1200,6 +1230,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
 			guard("tick", tick)
 		end)
 		guard("snapshot", selftest.snapshot, "login")
+	elseif event == "LOOT_OPENED" then
+		if ns.db then
+			guard("lootOpened", ns.onLootOpened)
+		end
 	elseif event == "PLAYER_REGEN_ENABLED" then
 		if ns.db then
 			guard("combatEnd", ns.onCombatEnd)

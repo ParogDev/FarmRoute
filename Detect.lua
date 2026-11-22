@@ -289,8 +289,9 @@ local function sampleVignettes()
 	end
 	local p = probeDB()
 	p.vignetteCount = #list
-	for _, guid in ipairs(list) do
-		if not vignettesSeen[guid] then
+	for _, g in ipairs(list) do
+		local guid = plain(g) -- a secret GUID can't be a table key
+		if guid and not vignettesSeen[guid] then
 			vignettesSeen[guid] = true
 			local info = call(C_VignetteInfo.GetVignetteInfo, guid)
 			local name = info and plain(info.name)
@@ -326,10 +327,22 @@ local function sampleCursor()
 	p.cursor[name] = { type = data.type, lines = texts }
 end
 
+function D.sampledNames()
+	local p, n = ns.db.probe or {}, 0
+	for _ in pairs(p.cursor or {}) do
+		n = n + 1
+	end
+	for _ in pairs(p.vignettes or {}) do
+		n = n + 1
+	end
+	return n
+end
+
 function D.tick()
 	D.update("tick")
 	sampleNav()
-	if ns.db.settings.probe then
+	-- vignette and cursor sampling only while walking, and at most 60 names in SavedVariables
+	if ns.db.settings.probe and ns.db.running and D.sampledNames() < 60 then
 		sampleVignettes()
 		sampleCursor()
 	end

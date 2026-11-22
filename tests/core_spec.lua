@@ -102,7 +102,16 @@ describe("FarmRoute core", function()
 		mock.gameTime = mock.gameTime + 5
 		mock.tick()
 		assert.equals(7, ns.currentIndex())
-		-- looted: the chest goes; after LOST_AFTER the point is checked with a chest
+		-- the target flips to a chair and back: no loot, no advance
+		mock.soft = { guid = "GameObject-0-1-0-12-61088-00001", name = "Wooden Chair", tooltip = {} }
+		mock.tick()
+		mock.gameTime = mock.gameTime + 2
+		mock.tick()
+		assert.equals(7, ns.currentIndex())
+		mock.soft = footlocker(179490, 150)
+		mock.tick()
+		-- opened (LOOT_OPENED), then gone: after LOST_AFTER the point is checked with a chest
+		mock.fire("LOOT_OPENED")
 		mock.soft = nil
 		mock.tick()
 		mock.gameTime = mock.gameTime + 2

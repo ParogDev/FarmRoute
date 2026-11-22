@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+- A chest counts as looted only when the loot window opens for it. A chair taking the soft target no longer moves the route on.
+- A visit counts as empty only when detection could work (health OK, out of combat). Otherwise no history entry is made.
+- Switching route, `/fr goto` and every pin move reset the point's wait. The chests seen this loop are kept per route.
+- `/fr off` in combat puts your soft-target settings back when combat ends. Skips start no respawn timer.
+
 ## 0.2.3
 
 - `/fr keepinteract` leaves your own change in Options > Controls alone and only undoes addons. A put-back blocked by combat happens when combat ends. Its log entries now read "FarmRoute (keepinteract)".
