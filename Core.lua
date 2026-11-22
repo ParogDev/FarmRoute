@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.1.6"
+ns.VERSION = "0.1.7"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -18,6 +18,7 @@ local DEFAULTS = {
 	screenLine = true,
 	mapLines = true,
 	minimapDots = true,
+	keepInteract = true,
 }
 
 local counters = { advanceArrived = 0, advanceKey = 0, advanceNavReached = 0, imports = 0, placeFailed = 0 }
@@ -282,7 +283,7 @@ local HELP = {
 	"/fr radius <yards> - arrival distance (now %d); /fr auto on|off - advance on arrival",
 	"/fr respawn <minutes> [n] - respawn timer for the route or point n (0 = off); /fr timers reset",
 	"/fr mode pin|tomtom - Blizzard's in-world pin or TomTom's arrow; /fr line on|off; /fr map on|off; /fr minimap on|off",
-	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on",
+	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on; /fr keepinteract on|off - keep it on",
 }
 
 local function onOff(v)
@@ -495,6 +496,10 @@ function commands.map(arg)
 	toggle("mapLines", arg, "world map route")
 end
 
+function commands.keepinteract(arg)
+	toggle("keepInteract", arg, "keep the interact key on")
+end
+
 function commands.minimap(arg)
 	toggle("minimapDots", arg, "minimap route")
 end
@@ -531,6 +536,7 @@ end
 local INTERACT = "SoftTargetInteract"
 local INTERACT_ON = "3" -- always on, as Lueur sets it
 local lastLuaSet -- { value, by, at = GetTime() }
+local selfSet = false -- true while FarmRoute itself calls SetCVar
 local interactWarned
 
 local function interactValue()
@@ -570,11 +576,48 @@ local function logInteract(value, by)
 	end
 end
 
+local reasserts, fightWarned = {}, false
+local REASSERT_MAX, REASSERT_WINDOW = 3, 10 -- more than 3 put-backs in 10 s: another addon is fighting us
+
+-- /fr keepinteract on: put the key back to 3 whenever something changes it, outside combat. Stops and says
+-- so when another addon keeps changing it back, instead of looping.
+local function reassert(st)
+	if not ns.db.settings.keepInteract or InCombatLockdown() then
+		return false
+	end
+	local now = GetTime()
+	for i = #reasserts, 1, -1 do
+		if now - reasserts[i] > REASSERT_WINDOW then
+			table.remove(reasserts, i)
+		end
+	end
+	if #reasserts >= REASSERT_MAX then
+		if not fightWarned then
+			fightWarned = true
+			say(
+				"|cffff4040something keeps changing the interact key back; stopped putting it back.|r /fr interact shows who"
+			)
+		end
+		return false
+	end
+	reasserts[#reasserts + 1] = now
+	fightWarned = false
+	local last = ns.db.interactLog[#ns.db.interactLog] -- the change being undone, read before ours is logged
+	selfSet = true
+	pcall(C_CVar.SetCVar, INTERACT, INTERACT_ON)
+	selfSet = false
+	say("interact key put back to 3 (was " .. st.value .. (last and (", set by " .. last.by) or "") .. ")")
+	return ns.interactState().ok
+end
+
 function ns.checkInteract(source)
 	local st = ns.interactState()
 	if st.ok then
 		interactWarned = false
 		return st
+	end
+	if reassert(st) then
+		return ns.interactState()
 	end
 	if not interactWarned then
 		interactWarned = true
@@ -585,8 +628,6 @@ function ns.checkInteract(source)
 	end
 	return st
 end
-
-local selfSet = false
 
 -- CVAR_UPDATE may fire inside SetCVar, before the post-hook has recorded the caller: attribute next frame.
 function ns.onCVarUpdate(name, value)

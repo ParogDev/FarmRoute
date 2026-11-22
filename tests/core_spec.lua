@@ -93,8 +93,22 @@ describe("FarmRoute core", function()
 		assert.is_false(ns.Nav.marker.shown)
 	end)
 
+	it("keepinteract puts the key back, and stops when another addon fights it", function()
+		mock.login(nil)
+		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
+		C_CVar.SetCVar("SoftTargetInteract", 1)
+		assert.equals("3", mock.cvars.SoftTargetInteract)
+		assert.matches("put back to 3 %(was 1, set by Plater%)", table.concat(mock.chat, "\n"))
+		for _ = 1, 5 do
+			C_CVar.SetCVar("SoftTargetInteract", 1)
+		end
+		assert.equals("1", mock.cvars.SoftTargetInteract)
+		assert.matches("keeps changing the interact key", table.concat(mock.chat, "\n"))
+	end)
+
 	it("warns when the interact key is off and names who turned it off", function()
 		mock.login(nil)
+		SlashCmdList.FARMROUTE("keepinteract off")
 		C_CVar.SetCVar("SoftTargetInteract", 0) -- the mock stack says Lueur
 		assert.equals("Lueur", FarmRouteDB.interactLog[1].by)
 		assert.matches("Interact key is off.*turned off by Lueur", mock.chat[#mock.chat])
@@ -113,6 +127,7 @@ describe("FarmRoute core", function()
 
 	it("counts gamepad-only (1) as off, as Plater set it in game", function()
 		mock.login(nil)
+		SlashCmdList.FARMROUTE("keepinteract off")
 		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
 		C_CVar.SetCVar("SoftTargetInteract", 1)
 		assert.is_false(ns.interactState().ok)
