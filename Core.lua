@@ -505,43 +505,54 @@ function ns.recordFind(objectID)
 			local list = routeYards(route, c)
 			local action, i, d = L.findTarget(route, list, wx, wy)
 			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
-			if not mapID then
-				ns.mapWhy = mx -- a point on another map would vanish from the route's map: skipped
-				i = nil
-			elseif action == "far" then -- luacheck: ignore 542
+			local noMap = not mapID and mx or nil -- why the find has no position on the route's map
+			local entry -- this route's line in db.finds
+			if action == "far" then -- luacheck: ignore 542
 				-- the same chest kind somewhere else: not this route's
 			elseif action == "new" then
-				local floor = route.points[1] and route.points[1].floor
-				local p = { mapID = mapID, x = mx, y = my, label = "Learned", floor = floor, finds = 1 }
-				ns.remapRoute(name, L.insertMap(#route.points, i))
-				table.insert(route.points, i, p)
+				if noMap then
+					i = nil -- a point on another map would vanish from the route's map
+					entry = { route = name, objectID = objectID, action = "skipped", why = noMap }
+				else
+					local floor = route.points[1] and route.points[1].floor
+					local p = { mapID = mapID, x = mx, y = my, label = "Learned", floor = floor, finds = 1 }
+					ns.remapRoute(name, L.insertMap(#route.points, i))
+					table.insert(route.points, i, p)
+				end
+			elseif noMap then
+				-- an existing point: the find counts, its coordinate stays
+				local p = route.points[i]
+				p.finds = (L.isConfirmed(p) and p.finds or 0) + 1
 			else
 				L.mergeFind(route.points[i], mx, my)
 			end
 			if i then
-				done = { route = name, objectID = objectID, action = action, point = i }
-				done.yd, done.at = d and math.floor(d + 0.5), date("%Y-%m-%d %H:%M:%S")
-				L.push(ns.db.finds, done, FINDS_MAX)
+				entry = { route = name, objectID = objectID, action = action, point = i, why = noMap }
+				entry.yd = d and math.floor(d + 0.5)
 				local what = action == "new" and "new spawn" or (action == "confirm" and "seed confirmed") or "spawn"
 				say(string.format("%s learned: %s", what, L.formatPoint(route, i)))
-				-- the looted chest is this point now: the loot logic and history follow it
 				if name == ns.db.active then
-					seenThisLoop[i] = true
+					-- a chest held from another route (no tick since the switch) is not this loot's
+					local own = seenRoute == name and chest or nil
 					local objective = ns.db.current[name]
-					local wasObjective = chest and objective == chest.point
-					if chest then
-						chest.point = i
-					end
-					if wasObjective and objective ~= i then
-						-- the chest is here: no vias, fresh point clocks, the pin on it
-						local keep = chest
+					if own and objective == own.point and objective ~= i then
+						-- the looted chest is the objective, at its learned point now: no vias, fresh clocks
 						setCurrent(i)
-						chest = keep
-					elseif not wasObjective and objective ~= i then
+					elseif not (own and objective == own.point) and objective ~= i then
 						-- another chest of the loop, looted on the way: don't send the player back to it
 						ns.checkedFor(name)[i] = true
 					end
+					-- after setCurrent, which forgets another route's state: the loot logic follows this point
+					seenThisLoop[i] = true
+					if own then
+						chest.point = i
+					end
 				end
+			end
+			if entry then
+				entry.at = date("%Y-%m-%d %H:%M:%S")
+				L.push(ns.db.finds, entry, FINDS_MAX)
+				done = entry
 			end
 		end
 	end
@@ -693,9 +704,10 @@ local function learnTick(route)
 	end
 	local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
 	if not mapID then
-		lr.why = mx
+		lr.why = mx -- shown by /fr learn and the selftest
 		return
 	end
+	lr.why = nil
 	lr.samples[#lr.samples + 1] = { mapID = mapID, x = mx, y = my, wx = wx, wy = wy, c = c }
 	if GetTime() - lastLearnDraw >= LEARN_REDRAW then
 		lastLearnDraw = GetTime()
@@ -821,7 +833,7 @@ function selftest.snapshot(phase)
 			n.finds = #ns.db.finds
 			n.pin = ns.pinIndex()
 			local lr = ns.db.learn[route.name]
-			n.learn = lr and { recording = lr.recording, samples = #lr.samples } or nil
+			n.learn = lr and { recording = lr.recording, samples = #lr.samples, why = lr.why } or nil
 			return n
 		end)() or nil,
 		lastError = selftest.lastError,
@@ -972,7 +984,13 @@ local function learnCommand(arg)
 		say("learn walk discarded")
 	else
 		say(
-			lr and string.format("learn: %s, %d samples", lr.recording and "recording" or "stopped", #lr.samples)
+			lr
+					and string.format(
+						"learn: %s, %d samples%s",
+						lr.recording and "recording" or "stopped",
+						#lr.samples,
+						lr.why and (" (not sampling: " .. lr.why .. ")") or ""
+					)
 				or "/fr learn on|off|accept|discard"
 		)
 		return
