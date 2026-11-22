@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.2.0"
+ns.VERSION = "0.2.1"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -1144,6 +1144,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
 		if ... == ADDON then
 			ns.initDB(FarmRouteDB)
 			guard("hookInteract", ns.hookInteract)
+			guard("hookTooltips", ns.Detect.hookTooltips)
 		end
 	elseif event == "CVAR_UPDATE" then
 		if ns.db then

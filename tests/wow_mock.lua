@@ -187,6 +187,8 @@ function M.install()
 	-- the soft-interact target: nil, or { guid, name, tooltip = { lines }, plate = bool }
 	M.soft = nil
 	_G.ITEM_MIN_SKILL = "Requires %s (%d)"
+	_G.Enum = { TooltipDataType = { Unit = 2, Object = 4 } }
+	_G.TooltipDataProcessor = { AddTooltipPostCall = function() end }
 	_G.UnitIsGameObject = function(u)
 		return u == "softinteract" and M.soft ~= nil
 	end

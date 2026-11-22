@@ -114,6 +114,22 @@ describe("FarmRoute core", function()
 		assert.is_nil(ns.selftest.lastError)
 	end)
 
+	it("reads the minimum skill from the mouseover tooltip when the soft target's tooltip is empty", function()
+		mock.login(nil)
+		local p7 = ns.activeRoute().points[7]
+		mock.pos = { p7.x + 6 / mock.YARDS, p7.y }
+		mock.soft = footlocker(179490, 150)
+		mock.soft.tooltip = {} -- as in game
+		mock.tick()
+		assert.is_nil(ns.markerInfo().need)
+		ns.Detect.onObjectTooltip(nil, {
+			lines = { { leftText = "Battered Footlocker" }, { leftText = "Requires Lockpicking (150)" } },
+		})
+		assert.equals(150, FarmRouteDB.objectNeed[179490])
+		assert.equals(150, ns.markerInfo().need)
+		assert.equals("hooked", ns.Detect.status.tooltipHook)
+	end)
+
 	it("ignores chests of another route's kind and chests with no point in range", function()
 		mock.login(nil)
 		local p7 = ns.activeRoute().points[7]

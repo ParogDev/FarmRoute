@@ -72,6 +72,11 @@ function D.read()
 	local plate = call(C_NamePlate and C_NamePlate.GetNamePlateForUnit, SOFT)
 	local alpha = plate and plain(call(plate.GetEffectiveAlpha, plate)) or nil
 	local texts, need = tooltipOf(SOFT)
+	-- in game the unit tooltip of a soft-targeted object has no lines (probe, 2026-11-21): the skill comes
+	-- from the mouseover tooltip, remembered by name (D.hookTooltips)
+	if not need and name and ns.db.needByName and ns.db.needByName[name] then
+		need = ns.db.needByName[name]
+	end
 	D.status.lastWhy = guidSecret and "GUID is a secret value" or "read"
 	return {
 		guid = guid,
@@ -346,6 +351,51 @@ function D.cvars()
 		out[n] = ok and v or "unreadable"
 	end
 	return out
+end
+
+-- The mouseover tooltip of a world object ("Battered Footlocker" / "Requires Lockpicking (150)"): remember the
+-- skill by name, and by object id for every object of that name the probe has seen.
+function D.onObjectTooltip(_, data)
+	if type(data) ~= "table" or type(data.lines) ~= "table" or not data.lines[1] then
+		return
+	end
+	local texts = {}
+	for i, line in ipairs(data.lines) do
+		local t = plain(line.leftText)
+		texts[#texts + 1] = type(t) == "string" and t or ""
+		if i >= 8 then
+			break
+		end
+	end
+	requiresPattern = requiresPattern or L.requiresPattern(ITEM_MIN_SKILL)
+	local skill, level = L.parseRequires(texts, requiresPattern)
+	local name = texts[1]
+	if not skill or name == "" then
+		return
+	end
+	ns.db.needByName = ns.db.needByName or {}
+	ns.db.needByName[name] = { skill = skill, level = level }
+	for id, o in pairs(probeDB().objects) do
+		if o.name == name and tonumber(id) then
+			ns.db.objectNeed[tonumber(id)] = level
+		end
+	end
+	if D.current and D.current.name == name then
+		D.current.need = ns.db.needByName[name]
+	end
+	D.status.tooltipNeed = name .. " " .. level
+end
+
+function D.hookTooltips()
+	local objectType = Enum and Enum.TooltipDataType and Enum.TooltipDataType.Object
+	if not (TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and objectType) then
+		D.status.tooltipHook = "TooltipDataProcessor or Enum.TooltipDataType.Object missing"
+		return
+	end
+	TooltipDataProcessor.AddTooltipPostCall(objectType, function(tooltip, data)
+		ns.guard("objectTooltip", D.onObjectTooltip, tooltip, data)
+	end)
+	D.status.tooltipHook = "hooked"
 end
 
 -- Player's skill rank by skill line name ("Lockpicking"), or nil and why.

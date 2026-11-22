@@ -28,7 +28,7 @@ end
 -- FrameXML globals the generated list doesn't carry (it is built from the C API lists).
 for _, g in ipairs({
 	"DEFAULT_CHAT_FRAME", "UIParent", "WorldMapFrame", "UiMapPoint", "CreateVector2D", "UISpecialFrames",
-	"LibStub", "TomTom", "ITEM_MIN_SKILL",
+	"LibStub", "TomTom", "ITEM_MIN_SKILL", "TooltipDataProcessor", "Enum",
 }) do
 	read_globals[#read_globals + 1] = g
 end
