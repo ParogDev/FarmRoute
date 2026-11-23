@@ -295,10 +295,14 @@ function Nav.hideMarker(why)
 end
 
 -- Called from the ticker. lineEnabled: the /fr line setting; radius: the arrival radius (fade inside 1.5x);
--- info: what the marker shows (Core's ns.markerInfo: state, need, skill, label).
-function Nav.updateScreenLine(lineEnabled, radius, info)
+-- info: what the marker shows (Core's ns.markerInfo: state, need, skill, label); hidden: the "hide the marker
+-- and line" setting (fishing from the shore, where the yards never come down).
+function Nav.updateScreenLine(lineEnabled, radius, info, hidden)
 	if not lineFrame then
 		return
+	end
+	if hidden then
+		return hideAll("hidden by setting (/fr marker)")
 	end
 	local navFrame = C_Navigation.GetFrame()
 	if Nav.state.mode ~= "pin" or not Nav.state.ok then
