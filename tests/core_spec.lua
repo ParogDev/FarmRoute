@@ -295,6 +295,64 @@ describe("FarmRoute core", function()
 		assert.is_false(ns.Nav.marker.shown)
 	end)
 
+	it("hides the marker and line by setting, off by default, and the route still advances", function()
+		mock.login(nil)
+		assert.is_false(FarmRouteDB.settings.hideMarker)
+		mock.navFrame, mock.navDistance = mock.widget(), 40
+		mock.tick()
+		assert.is_true(ns.Nav.marker.shown)
+		SlashCmdList.FARMROUTE("marker off")
+		assert.is_true(FarmRouteDB.settings.hideMarker)
+		assert.is_false(ns.Nav.marker.shown)
+		mock.tick()
+		assert.is_false(ns.Nav.marker.shown)
+		assert.equals("hidden by setting (/fr marker)", ns.Nav.marker.why)
+		-- arrival still works with nothing drawn
+		local p = FarmRouteDB.routes[FarmRouteDB.active].points[1]
+		mock.pos = { p.x, p.y }
+		mock.gameTime = mock.gameTime + 5
+		mock.tick()
+		mock.gameTime = mock.gameTime + 1
+		mock.tick()
+		assert.equals(2, ns.currentIndex())
+		SlashCmdList.FARMROUTE("marker on")
+		assert.is_false(FarmRouteDB.settings.hideMarker)
+		mock.tick()
+		assert.is_true(ns.Nav.marker.shown)
+	end)
+
+	it("registers the Options panel checkbox, and names a missing Settings API", function()
+		mock.login(nil)
+		assert.equals("Settings API missing", ns.selftest.snapshot("t").settingsPanel)
+		local proxy
+		_G.Settings = {
+			VarType = { Boolean = "boolean" },
+			Default = { False = false },
+			RegisterVerticalLayoutCategory = function()
+				return {}
+			end,
+			RegisterProxySetting = function(_, _, _, _, _, get, set)
+				proxy = { get = get, set = set }
+				function proxy:GetValue()
+					return self.get()
+				end
+				function proxy:SetValue(v)
+					self.set(v)
+				end
+				return proxy
+			end,
+			CreateCheckbox = function() end,
+			RegisterAddOnCategory = function() end,
+		}
+		ns.registerSettings()
+		_G.Settings = nil
+		assert.equals("registered", ns.selftest.snapshot("t").settingsPanel)
+		proxy:SetValue(true)
+		assert.is_true(FarmRouteDB.settings.hideMarker)
+		SlashCmdList.FARMROUTE("marker on")
+		assert.is_false(proxy:GetValue())
+	end)
+
 	it("keepinteract puts the key back, and stops when another addon fights it", function()
 		mock.login(nil)
 		mock.stack = '[string "@Interface/AddOns/Plater/Plater.lua"]:1: in function'
