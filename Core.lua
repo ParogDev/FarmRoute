@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.3.2"
+ns.VERSION = "0.3.3"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -874,6 +874,7 @@ ns.guard = guard
 -- /fr
 -- ---------------------------------------------------------------------------------------------------------
 local HELP = {
+	"/fr or /fr routes - the route picker: every route, its zone, and Show on map / Walk this route",
 	"/fr on | off - start or stop the route",
 	"/fr next | prev | goto <n> - move the pin (keybinds: Options > Keybindings > FarmRoute)",
 	"/fr route [name] - list routes or switch; /fr new <name>; /fr delroute <name>",
@@ -1093,6 +1094,18 @@ commands["goto"] = function(arg)
 	status()
 end
 
+-- The picker's "Walk this route": make it active and start walking it.
+function ns.pickRoute(name)
+	if not ns.db.routes[name] then
+		say("no route '" .. tostring(name) .. "'")
+		return
+	end
+	ns.db.active = name
+	ns.start()
+	MapLines.refresh()
+	status()
+end
+
 function commands.route(arg)
 	if arg ~= "" then
 		if not ns.db.routes[arg] then
@@ -1108,6 +1121,11 @@ function commands.route(arg)
 	for name, r in pairs(ns.db.routes) do
 		say((name == ns.db.active and "> " or "  ") .. name .. " (" .. #r.points .. " points)")
 	end
+	say("/fr routes opens the route picker")
+end
+
+function commands.routes()
+	ns.HUD.togglePicker()
 end
 
 function commands.new(arg)
@@ -1316,6 +1334,7 @@ SlashCmdList.FARMROUTE = function(msg)
 		end
 	elseif cmd == "" then
 		status()
+		guard("/fr picker", ns.HUD.togglePicker)
 	else
 		for _, line in ipairs(HELP) do
 			say(line:format(ns.db.settings.radius))

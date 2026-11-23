@@ -234,6 +234,77 @@ local WRECKAGE = {
 	},
 }
 
+-- ---------------------------------------------------------------------------------------------------------
+-- The route picker's view of a route: what it farms, where, and the group it is listed under.
+-- ---------------------------------------------------------------------------------------------------------
+L.TRUNKS = {
+	[180662] = "Watertight Trunk",
+	[180685] = "Iron Bound Trunk",
+	[180751] = "Mithril Bound Trunk",
+	[180901] = "Mithril Bound Trunk",
+}
+
+-- Where on the zone map the spots are, in words: the picker shows it under the route.
+L.WHERE = {
+	["Wreckage T2 Wetlands"] = "West coast, from Menethil Harbor up to the north shore.",
+	["Wreckage T2 Hillsbrad"] = "South coast, on both sides of Southshore.",
+	["Wreckage T3 Barrens"] = "East coast south of Ratchet. Five spots close together.",
+	["Wreckage T4 Tanaris"] = "East coast, from northeast of Gadgetzan down past Lost Rigger Cove.",
+	["Wreckage T4 Feralas"] = "The Forgotten Coast: the mainland shore across from Feathermoon.",
+	["Wreckage T4 Stranglethorn"] = "The whole west coast, down past Booty Bay and round the southern tip.",
+	["Angor Battered"] = "Angor Fortress, upper floor.",
+	["Angor Dented"] = "Angor Fortress, lower floor.",
+}
+
+L.GROUPS = { "Fishing: Floating Wreckage", "Lockpicking", "Your routes" }
+
+-- { name, group, tier, trunk, where, mapID, count } for a saved route.
+function L.routeInfo(route)
+	local info = { name = route.name, count = #route.points, where = L.WHERE[route.name] }
+	local p = route.points[1]
+	info.mapID = p and p.mapID
+	local tier = route.name:match("^Wreckage T(%d) ")
+	if tier then
+		info.group, info.tier = L.GROUPS[1], tonumber(tier)
+		for id in pairs(route.objects or {}) do
+			info.trunk = info.trunk or L.TRUNKS[id]
+		end
+	elseif route.name:match("^Angor ") then
+		info.group = L.GROUPS[2]
+	else
+		info.group = L.GROUPS[3]
+	end
+	return info
+end
+
+-- The picker's rows: { header = group } then that group's routes, in L.GROUPS order; wreckage by tier, then
+-- name. A group with no routes has no header.
+function L.pickerRows(routes)
+	local by = {}
+	for _, r in pairs(routes) do
+		local info = L.routeInfo(r)
+		by[info.group] = by[info.group] or {}
+		table.insert(by[info.group], info)
+	end
+	local rows = {}
+	for _, g in ipairs(L.GROUPS) do
+		local list = by[g]
+		if list then
+			table.sort(list, function(a, b)
+				if (a.tier or 0) ~= (b.tier or 0) then
+					return (a.tier or 0) < (b.tier or 0)
+				end
+				return a.name < b.name
+			end)
+			rows[#rows + 1] = { header = g }
+			for _, info in ipairs(list) do
+				rows[#rows + 1] = info
+			end
+		end
+	end
+	return rows
+end
+
 -- The routes every install got before seeds were tracked by name (0.3.1 and older).
 L.LEGACY_SEEDS = { "Angor Battered", "Angor Dented" }
 

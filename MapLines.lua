@@ -31,7 +31,14 @@ local overlay
 local lines, dots, cores = {}, {}, {}
 local trail, marks, markCores = {}, {}, {}
 
+-- A route the picker is showing on the world map instead of the active one (a name, or nil).
+M.preview = nil
+
 local function routeView()
+	local previewed = M.preview and ns.db and ns.db.routes[M.preview]
+	if previewed and #previewed.points > 0 then
+		return previewed, nil, ns.timersFor(previewed.name), time()
+	end
 	local route = ns.activeRoute and ns.activeRoute()
 	if not route or #route.points == 0 then
 		return nil
