@@ -75,6 +75,11 @@ describe("FarmRoute core", function()
 		assert.is_nil((FarmRouteDB.history["Wreckage T3 Barrens"] or {})[1])
 		SlashCmdList.FARMROUTE("skip")
 		assert.is_nil((FarmRouteDB.history["Wreckage T3 Barrens"] or {})[2])
+		-- looting a pool from the shore moves no seed point and adds none
+		local x1 = route.points[1].x
+		ns.recordFind(180685)
+		assert.equals(5, #route.points)
+		assert.equals(x1, route.points[1].x)
 	end)
 
 	it("writes the selftest with the code version on login", function()

@@ -505,7 +505,8 @@ function ns.recordFind(objectID)
 	end
 	local done
 	for name, route in pairs(ns.db.routes) do
-		if type(route.objects) == "table" and route.objects[objectID] then
+		-- a route that can't detect its objects (fishing pools) learns nothing: the player stands off the spawn
+		if type(route.objects) == "table" and route.objects[objectID] and L.tracksVisits(route) then
 			local list = routeYards(route, c)
 			local action, i, d = L.findTarget(route, list, wx, wy)
 			local mapID, mx, my = onRouteMap(route, c, wx, wy, pm, px, py)
