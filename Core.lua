@@ -750,11 +750,19 @@ local function tick()
 	end
 end
 
+-- The open picker follows route changes. Guarded: a picker error must not stop the route from starting.
+local function refreshPicker()
+	if ns.HUD and ns.HUD.refreshPicker and ns.guard then
+		ns.guard("picker", ns.HUD.refreshPicker)
+	end
+end
+ns.refreshPicker = refreshPicker
+
 function ns.start()
 	running = true
 	ns.db.running = true
 	place()
-	ns.HUD.refreshPicker()
+	refreshPicker()
 end
 
 function ns.stop()
@@ -764,7 +772,7 @@ function ns.stop()
 	Nav.clear()
 	Nav.hideMarker("stopped")
 	MapLines.refresh()
-	ns.HUD.refreshPicker()
+	refreshPicker()
 end
 
 function ns.importPoints(points, replace)
@@ -1117,6 +1125,7 @@ function commands.route(arg)
 		ns.db.active = arg
 		place()
 		MapLines.refresh()
+		ns.refreshPicker()
 		status()
 		return
 	end
@@ -1137,6 +1146,7 @@ function commands.new(arg)
 	end
 	ns.db.routes[arg] = { name = arg, points = {}, respawn = 0 }
 	ns.db.active = arg
+	ns.refreshPicker()
 	say("new route '" .. arg .. "' is active: /fr add or /fr import")
 end
 
@@ -1151,6 +1161,7 @@ function commands.delroute(arg)
 		place()
 	end
 	MapLines.refresh()
+	ns.refreshPicker()
 	say("route '" .. arg .. "' deleted")
 end
 
