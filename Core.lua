@@ -754,6 +754,7 @@ function ns.start()
 	running = true
 	ns.db.running = true
 	place()
+	ns.HUD.refreshPicker()
 end
 
 function ns.stop()
@@ -763,6 +764,7 @@ function ns.stop()
 	Nav.clear()
 	Nav.hideMarker("stopped")
 	MapLines.refresh()
+	ns.HUD.refreshPicker()
 end
 
 function ns.importPoints(points, replace)
@@ -1334,7 +1336,7 @@ SlashCmdList.FARMROUTE = function(msg)
 		end
 	elseif cmd == "" then
 		status()
-		guard("/fr picker", ns.HUD.togglePicker)
+		guard("/fr picker", ns.HUD.showPicker)
 	else
 		for _, line in ipairs(HELP) do
 			say(line:format(ns.db.settings.radius))

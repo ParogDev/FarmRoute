@@ -503,7 +503,9 @@ local function showDetail(f, info)
 	if info.tier then
 		lines[#lines + 1] = " "
 		lines[#lines + 1] = hex(C.dim)
-			.. "Pools sit out in the water. A spot counts as reached within 20 yd, so fish from the shore. "
+			.. "Pools sit out in the water. A spot counts as reached within "
+			.. ns.Logic.radiusOf(ns.db.routes[info.name], ns.db.settings)
+			.. " yd, so fish from the shore. "
 			.. '"Your fish got away" means your fishing skill plus pole and lure is too low for this zone.|r'
 	end
 	local active = ns.db.active == info.name
@@ -517,8 +519,16 @@ end
 local function fillRows(f)
 	local rows = ns.Logic.pickerRows(ns.db.routes)
 	local selectedInfo
+	for _, r in ipairs(rows) do
+		if not r.header and r.name == (f.selected or ns.db.active) then
+			selectedInfo = r
+		end
+	end
+	-- the mouse wheel scrolls the list a row at a time when it is longer than the window
+	local maxOffset = math.max(0, #rows - #f.rows)
+	f.offset = math.min(math.max(f.offset or 0, 0), maxOffset)
 	for i, row in ipairs(f.rows) do
-		local r = rows[i]
+		local r = rows[i + f.offset]
 		row.info = r and not r.header and r or nil
 		if not r then
 			row:Hide()
@@ -532,13 +542,13 @@ local function fillRows(f)
 				local mark = ns.db.active == r.name and (hex(C.ok) .. "> |r") or "   "
 				row.text:SetText(mark .. shown .. hex(C.dim) .. "  " .. r.count .. "|r")
 				row:EnableMouse(true)
-				if r.name == (f.selected or ns.db.active) then
-					selectedInfo = r
-				end
 			end
 		end
 	end
-	f.more:SetText(#rows > #f.rows and ((#rows - #f.rows) .. " more: /fr route lists all") or "")
+	f.more:SetText(
+		maxOffset > 0 and string.format("rows %d-%d of %d: scroll for more", f.offset + 1, f.offset + #f.rows, #rows)
+			or ""
+	)
 	showDetail(f, selectedInfo)
 end
 
@@ -559,6 +569,11 @@ local function buildPicker()
 	end
 	f:SetScript("OnHide", clearPreview)
 
+	f:EnableMouseWheel(true)
+	f:SetScript("OnMouseWheel", function(self, delta)
+		self.offset = (self.offset or 0) - delta
+		fillRows(self)
+	end)
 	f.rows = {}
 	for i = 1, MAX_ROWS do
 		local row = CreateFrame("Button", nil, f)
@@ -630,17 +645,26 @@ local function buildPicker()
 	return f
 end
 
-function HUD.togglePicker()
+function HUD.showPicker()
 	picker = picker or buildPicker()
-	if picker:IsShown() then
-		picker:Hide()
-		return
+	if not picker:IsShown() then
+		picker.selected, picker.offset = nil, 0
 	end
-	picker.selected = nil
 	fillRows(picker)
 	picker:Show()
 end
 
-function HUD.pickerShown()
-	return picker ~= nil and picker:IsShown()
+function HUD.togglePicker()
+	if picker and picker:IsShown() then
+		picker:Hide()
+		return
+	end
+	HUD.showPicker()
+end
+
+-- After the route starts or stops: the open picker's "> " mark and "Walking it" follow.
+function HUD.refreshPicker()
+	if picker and picker:IsShown() then
+		fillRows(picker)
+	end
 end

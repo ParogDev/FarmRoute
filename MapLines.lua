@@ -34,8 +34,9 @@ local trail, marks, markCores = {}, {}, {}
 -- A route the picker is showing on the world map instead of the active one (a name, or nil).
 M.preview = nil
 
-local function routeView()
-	local previewed = M.preview and ns.db and ns.db.routes[M.preview]
+-- The route to draw. Only the world map shows a preview: the minimap keeps the walked route and its pin.
+local function routeView(world)
+	local previewed = world and M.preview and ns.db and ns.db.routes[M.preview]
 	if previewed and #previewed.points > 0 then
 		return previewed, nil, ns.timersFor(previewed.name), time()
 	end
@@ -135,7 +136,7 @@ local function stroke(list, i, layer, c, alpha, thickness, x1, y1, x2, y2)
 end
 
 local function drawRoute(shown, w, h, scale)
-	local route, pin, timers, now = routeView()
+	local route, pin, timers, now = routeView(true)
 	if not route or not ns.db.settings.mapLines then
 		hideFrom(lines, 1)
 		hideFrom(dots, 1)

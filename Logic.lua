@@ -266,7 +266,12 @@ function L.routeInfo(route)
 	local tier = route.name:match("^Wreckage T(%d) ")
 	if tier then
 		info.group, info.tier = L.GROUPS[1], tonumber(tier)
+		local ids = {}
 		for id in pairs(route.objects or {}) do
+			ids[#ids + 1] = id
+		end
+		table.sort(ids) -- pairs has no order: the lowest id names the trunk, the same after every reload
+		for _, id in ipairs(ids) do
 			info.trunk = info.trunk or L.TRUNKS[id]
 		end
 	elseif route.name:match("^Angor ") then
