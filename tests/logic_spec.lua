@@ -2,6 +2,45 @@ local ns = {}
 assert(loadfile("Logic.lua"))("FarmRoute", ns)
 local L = ns.Logic
 
+describe("route picker rows", function()
+	local function byName()
+		local routes = {}
+		for _, r in ipairs(L.seedRoutes()) do
+			routes[r.name] = r
+		end
+		routes["My herbs"] = { name = "My herbs", points = { { mapID = 1, x = 0.1, y = 0.1 } } }
+		return routes
+	end
+
+	it("groups wreckage first by tier, then lockpicking, then the player's own", function()
+		local rows = L.pickerRows(byName())
+		assert.equals("Fishing: Floating Wreckage", rows[1].header)
+		assert.equals("Wreckage T2 Hillsbrad", rows[2].name)
+		assert.equals("Wreckage T2 Wetlands", rows[3].name)
+		assert.equals("Wreckage T3 Barrens", rows[4].name)
+		assert.equals("Lockpicking", rows[8].header)
+		assert.equals("Your routes", rows[11].header)
+		assert.equals("My herbs", rows[12].name)
+		assert.equals(12, #rows)
+	end)
+
+	it("names the trunk, tier, zone map, spot count and where", function()
+		local info = L.routeInfo(byName()["Wreckage T4 Tanaris"])
+		assert.equals(4, info.tier)
+		assert.equals("Mithril Bound Trunk", info.trunk)
+		assert.equals(1446, info.mapID)
+		assert.equals(32, info.count)
+		assert.truthy(info.where:find("Gadgetzan", 1, true))
+	end)
+
+	it("lists no header for an empty group", function()
+		local rows = L.pickerRows({ ["Mine"] = { name = "Mine", points = {} } })
+		assert.equals(2, #rows)
+		assert.equals("Your routes", rows[1].header)
+		assert.is_nil(rows[2].mapID)
+	end)
+end)
+
 describe("seed routes", function()
 	it("has the Angor upstairs and downstairs loops on Badlands", function()
 		local r = L.seedRoutes()

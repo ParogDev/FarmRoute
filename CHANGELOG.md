@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Route picker: `/fr` (or `/fr routes`) opens a window listing every route, grouped into Floating Wreckage fishing (by trunk tier), Lockpicking and your own routes. Pick one to see its zone, whether you are in it, the spot count, the trunk it drops and where on the zone map the spots are.
+- "Show on map" opens the world map at that zone with the route drawn, without switching to it. "Walk this route" makes it the active route and starts it.
+
 ## 0.3.2
 
 - Six new seed routes for Floating Wreckage fishing pools, one per zone: Wetlands and Hillsbrad (Watertight Trunk, tier 2), The Barrens (Iron Bound Trunk, tier 3), Tanaris, Feralas and Stranglethorn (Mithril Bound Trunk, tier 4). The spawn points come from Forever Questlog and are ordered as a loop along the shore. Pick one with `/fr route Wreckage T4 Tanaris`.

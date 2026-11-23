@@ -27,6 +27,7 @@ Stonetalon Mountains, Arathi Highlands and Azshara have tier 2 and tier 4 pools 
 
 | Command | What it does |
 |---|---|
+| `/fr`, `/fr routes` | The route picker: every route with its zone, Show on map, and Walk this route |
 | `/fr on`, `/fr off` | Start or stop the route (stopping keeps the points) |
 | `/fr next`, `/fr prev`, `/fr goto <n>` | Move the pin |
 | `/fr route [name]`, `/fr new <name>`, `/fr delroute <name>` | List, switch, create or delete routes |

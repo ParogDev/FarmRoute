@@ -448,3 +448,223 @@ function HUD.flash(text)
 		end)
 	end
 end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Route picker (/fr, /fr routes): every route grouped by what it farms, with the zone, where in it, the
+-- spot count and the trunk; "Show on map" opens the world map at the zone with that route drawn,
+-- "Walk this route" makes it the active route and starts it. Core supplies ns.pickRoute(name).
+-- ---------------------------------------------------------------------------------------------------------
+local PICK_W, PICK_H, LIST_W, ROW_H, MAX_ROWS = 560, 360, 230, 20, 15
+local picker
+
+local function zoneName(mapID)
+	local info = mapID and C_Map.GetMapInfo(mapID)
+	return info and info.name or ("map " .. tostring(mapID) .. " (unknown to this client)")
+end
+
+local function button(parent, text, w)
+	local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+	b:SetSize(w, 24)
+	b:SetText(text)
+	return b
+end
+
+local function clearPreview()
+	if ns.MapLines.preview then
+		ns.MapLines.preview = nil
+		ns.MapLines.refresh()
+	end
+end
+
+local function showDetail(f, info)
+	f.selected = info and info.name
+	for _, row in ipairs(f.rows) do
+		row.hl:SetShown(row.info ~= nil and row.info.name == f.selected)
+	end
+	if not info then
+		f.title:SetText("Pick a route on the left")
+		f.body:SetText("")
+		f.walk:Disable()
+		f.map:Disable()
+		return
+	end
+	local here = info.mapID and ns.playerMap() == info.mapID
+	local lines = {
+		hex(C.dim) .. "Zone|r  " .. zoneName(info.mapID) .. (here and (hex(C.ok) .. "  (you are here)|r") or ""),
+		hex(C.dim) .. "Spots|r  " .. info.count,
+	}
+	if info.trunk then
+		lines[#lines + 1] = hex(C.dim) .. "Drops|r  " .. info.trunk .. " (tier " .. info.tier .. ")"
+	end
+	if info.where then
+		lines[#lines + 1] = " "
+		lines[#lines + 1] = info.where
+	end
+	if info.tier then
+		lines[#lines + 1] = " "
+		lines[#lines + 1] = hex(C.dim)
+			.. "Pools sit out in the water. A spot counts as reached within "
+			.. ns.Logic.radiusOf(ns.db.routes[info.name], ns.db.settings)
+			.. " yd, so fish from the shore. "
+			.. '"Your fish got away" means your fishing skill plus pole and lure is too low for this zone.|r'
+	end
+	local active = ns.db.active == info.name
+	f.title:SetText(info.name .. (active and (hex(C.ok) .. "  (active)|r") or ""))
+	f.body:SetText(table.concat(lines, "\n"))
+	f.walk:SetEnabled(info.count > 0)
+	f.walk:SetText(active and ns.db.running and "Walking it" or "Walk this route")
+	f.map:SetEnabled(info.mapID ~= nil)
+end
+
+local function fillRows(f)
+	local rows = ns.Logic.pickerRows(ns.db.routes)
+	local selectedInfo
+	for _, r in ipairs(rows) do
+		if not r.header and r.name == (f.selected or ns.db.active) then
+			selectedInfo = r
+		end
+	end
+	-- the mouse wheel scrolls the list a row at a time when it is longer than the window
+	local maxOffset = math.max(0, #rows - #f.rows)
+	f.offset = math.min(math.max(f.offset or 0, 0), maxOffset)
+	for i, row in ipairs(f.rows) do
+		local r = rows[i + f.offset]
+		row.info = r and not r.header and r or nil
+		if not r then
+			row:Hide()
+		else
+			row:Show()
+			if r.header then
+				row.text:SetText(hex(C.orange) .. r.header .. "|r")
+				row:EnableMouse(false)
+			else
+				local shown = r.tier and r.name:gsub("^Wreckage T%d ", "") or r.name
+				local mark = ns.db.active == r.name and (hex(C.ok) .. "> |r") or "   "
+				row.text:SetText(mark .. shown .. hex(C.dim) .. "  " .. r.count .. "|r")
+				row:EnableMouse(true)
+			end
+		end
+	end
+	f.more:SetText(
+		maxOffset > 0 and string.format("rows %d-%d of %d: scroll for more", f.offset + 1, f.offset + #f.rows, #rows)
+			or ""
+	)
+	showDetail(f, selectedInfo)
+end
+
+local function buildPicker()
+	local f = CreateFrame("Frame", "FarmRoutePicker", UIParent, "BasicFrameTemplateWithInset")
+	f:SetSize(PICK_W, PICK_H)
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("MEDIUM") -- under the world map: "Show on map" opens it on top
+	f:SetMovable(true)
+	f:EnableMouse(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:SetClampedToScreen(true)
+	tinsert(UISpecialFrames, "FarmRoutePicker") -- Escape closes it
+	if f.TitleText then
+		f.TitleText:SetText("FarmRoute: routes")
+	end
+	f:SetScript("OnHide", clearPreview)
+
+	f:EnableMouseWheel(true)
+	f:SetScript("OnMouseWheel", function(self, delta)
+		self.offset = (self.offset or 0) - delta
+		fillRows(self)
+	end)
+	f.rows = {}
+	for i = 1, MAX_ROWS do
+		local row = CreateFrame("Button", nil, f)
+		row:SetSize(LIST_W - 16, ROW_H)
+		row:SetPoint("TOPLEFT", 14, -30 - (i - 1) * ROW_H)
+		row.hl = solid(row, "BACKGROUND")
+		row.hl:SetAllPoints(row)
+		tint(row.hl, C.orange, 0.25)
+		row.hl:Hide()
+		local hover = solid(row, "HIGHLIGHT")
+		hover:SetAllPoints(row)
+		tint(hover, C.text, 0.08)
+		row.text = label(row, "GameFontHighlightSmall", 12)
+		row.text:SetPoint("LEFT", 4, 0)
+		row.text:SetJustifyH("LEFT")
+		row:SetScript("OnClick", function(self)
+			if self.info then
+				showDetail(f, self.info)
+				clearPreview()
+			end
+		end)
+		f.rows[i] = row
+	end
+	f.more = label(f, "GameFontDisableSmall")
+	f.more:SetPoint("BOTTOMLEFT", 18, 14)
+
+	local x = LIST_W + 10
+	f.title = label(f, "GameFontNormalLarge", 15)
+	f.title:SetPoint("TOPLEFT", x, -34)
+	f.title:SetPoint("RIGHT", -16, 0)
+	f.title:SetJustifyH("LEFT")
+	f.body = label(f, "GameFontHighlight", 12)
+	f.body:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -12)
+	f.body:SetPoint("RIGHT", -16, 0)
+	f.body:SetJustifyH("LEFT")
+	f.body:SetJustifyV("TOP")
+	f.body:SetSpacing(3)
+
+	f.walk = button(f, "Walk this route", 140)
+	f.walk:SetPoint("BOTTOMRIGHT", -16, 14)
+	f.walk:SetScript("OnClick", function()
+		if f.selected then
+			clearPreview()
+			ns.pickRoute(f.selected)
+			fillRows(f)
+		end
+	end)
+	f.map = button(f, "Show on map", 140)
+	f.map:SetPoint("RIGHT", f.walk, "LEFT", -8, 0)
+	f.map:SetScript("OnClick", function()
+		local info = f.selected and ns.Logic.routeInfo(ns.db.routes[f.selected])
+		if not info or not info.mapID then
+			return
+		end
+		if InCombatLockdown() then
+			ns.say("the world map can't be opened from an addon in combat; try again after the fight")
+			return
+		end
+		ns.MapLines.preview = info.name
+		if not WorldMapFrame:IsShown() then
+			ToggleWorldMap()
+		end
+		WorldMapFrame:SetMapID(info.mapID)
+		ns.MapLines.refresh()
+	end)
+	if WorldMapFrame then
+		WorldMapFrame:HookScript("OnHide", clearPreview)
+	end
+	return f
+end
+
+function HUD.showPicker()
+	picker = picker or buildPicker()
+	if not picker:IsShown() then
+		picker.selected, picker.offset = nil, 0
+	end
+	fillRows(picker)
+	picker:Show()
+end
+
+function HUD.togglePicker()
+	if picker and picker:IsShown() then
+		picker:Hide()
+		return
+	end
+	HUD.showPicker()
+end
+
+-- After the route starts or stops: the open picker's "> " mark and "Walking it" follow.
+function HUD.refreshPicker()
+	if picker and picker:IsShown() then
+		fillRows(picker)
+	end
+end
