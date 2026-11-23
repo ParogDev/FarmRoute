@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.3.1"
+ns.VERSION = "0.3.2"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -69,12 +69,22 @@ function ns.initDB(saved)
 			db.settings[k] = v
 		end
 	end
-	if not db.seeded then
-		for _, r in ipairs(L.seedRoutes()) do
+	-- each seed route is added once: one the player deleted stays deleted, one added in a later version arrives
+	db.seededNames = db.seededNames or {}
+	if db.seeded and not next(db.seededNames) then
+		for _, name in ipairs(L.LEGACY_SEEDS) do
+			db.seededNames[name] = true
+		end
+	end
+	for _, r in ipairs(L.seedRoutes()) do
+		if not db.seededNames[r.name] then
 			if not db.routes[r.name] then
 				db.routes[r.name] = r
 			end
+			db.seededNames[r.name] = true
 		end
+	end
+	if not db.seeded then
 		db.active = db.active or "Angor Battered"
 		db.seeded = true
 	end
@@ -232,7 +242,7 @@ local function viaTick(route, i)
 			dn[k], vn[k] = L.distance(x, y, nx, ny), L.distance(vx, vy, nx, ny)
 		end
 	end
-	local at = L.nextVia(via.at, d, dn, vn, ns.db.settings.radius)
+	local at = L.nextVia(via.at, d, dn, vn, L.radiusOf(route, ns.db.settings))
 	if at ~= via.at then
 		via.at = at
 		place()
@@ -277,7 +287,7 @@ function ns.advance(dir, why, seen)
 	end
 	local checked, hist = ns.checkedFor(route.name), ns.historyFor(route.name)
 	checked[cur] = true
-	if seen ~= nil then
+	if seen ~= nil and L.tracksVisits(route) then
 		L.recordVisit(hist, cur, seen, now)
 	end
 	local i, objWhy = L.objective(route, timers, checked, hist, cur, now)
@@ -618,7 +628,7 @@ end
 local function arrivalTick(route, i, d)
 	local now = GetTime()
 	local s = ns.db.settings
-	if d <= s.radius and now - lastAdvance >= MIN_GAP and L.isUp(ns.timersFor(route.name), i, time()) then
+	if d <= L.radiusOf(route, s) and now - lastAdvance >= MIN_GAP and L.isUp(ns.timersFor(route.name), i, time()) then
 		nearSince = nil
 		if chest and chest.point == i then
 			return
@@ -781,6 +791,17 @@ local function version()
 end
 ns.version = version
 
+-- The client's name for each seed route's map: a uiMapID this client doesn't know shows as such.
+local function seedMaps()
+	local out = {}
+	for _, r in ipairs(L.seedRoutes()) do
+		local m = r.points[1].mapID
+		local info = C_Map.GetMapInfo(m)
+		out[r.name] = m .. " " .. (info and info.name or "unknown to C_Map.GetMapInfo")
+	end
+	return out
+end
+
 function selftest.snapshot(phase)
 	local okB, buildVersion, buildNumber, _, interface = pcall(GetBuildInfo)
 	local route = ns.activeRoute()
@@ -801,6 +822,7 @@ function selftest.snapshot(phase)
 		distanceWhy = lastDistanceWhy,
 		nav = okNav and nav or ("Nav.selftest raised: " .. tostring(nav)),
 		maps = MapLines.status,
+		seedMaps = seedMaps(),
 		settings = ns.db.settings,
 		counters = counters,
 		interact = ns.interactState(),

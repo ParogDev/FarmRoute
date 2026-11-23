@@ -15,16 +15,241 @@ L.MAX_RADIUS = 50
 -- ---------------------------------------------------------------------------------------------------------
 local BADLANDS = 1418
 
-local function seedRoute(name, label, floor, coords)
+local function seedRoute(name, label, floor, coords, mapID)
 	local points = {}
 	for i, c in ipairs(coords) do
-		points[i] = { mapID = BADLANDS, x = c[1] / 100, y = c[2] / 100, label = label .. " " .. i, floor = floor }
+		points[i] =
+			{ mapID = mapID or BADLANDS, x = c[1] / 100, y = c[2] / 100, label = label .. " " .. i, floor = floor }
 	end
 	return { name = name, points = points, respawn = 0 }
 end
 
+-- ---------------------------------------------------------------------------------------------------------
+-- Seed: Floating Wreckage fishing pools, one route per zone. Spawn coordinates from Forever Questlog's object
+-- pages 180662 (Watertight Trunk, tier 2), 180685 (Iron Bound Trunk, tier 3), 180751 and 180901 (Mithril
+-- Bound Trunk, tier 4); the order is a short loop along the shore. A pool is out in the water and the client
+-- can't soft-target it, so these routes arrive from the shore (WRECKAGE_RADIUS) and keep no visit history
+-- (detect = false): every spot stays in the loop.
+-- ---------------------------------------------------------------------------------------------------------
+L.WRECKAGE_RADIUS = 20
+
+local WRECKAGE = {
+	{
+		name = "Wreckage T2 Wetlands",
+		mapID = 1437,
+		object = 180662,
+		coords = {
+			{ 33.1, 11.3 },
+			{ 32.0, 12.4 },
+			{ 28.9, 15.5 },
+			{ 27.7, 17.3 },
+			{ 25.7, 19.0 },
+			{ 14.2, 43.8 },
+			{ 12.8, 61.5 },
+			{ 10.8, 63.1 },
+			{ 7.8, 63.0 },
+			{ 5.9, 62.6 },
+			{ 5.3, 58.4 },
+			{ 5.9, 56.6 },
+			{ 6.9, 56.7 },
+			{ 6.7, 54.5 },
+			{ 12.2, 44.0 },
+			{ 12.1, 40.5 },
+			{ 12.1, 38.6 },
+			{ 12.4, 36.1 },
+			{ 12.7, 33.5 },
+			{ 13.3, 31.6 },
+			{ 14.9, 27.5 },
+			{ 15.7, 26.2 },
+			{ 17.9, 22.0 },
+			{ 18.7, 20.8 },
+			{ 19.9, 20.2 },
+			{ 21.5, 19.4 },
+		},
+	},
+	{
+		name = "Wreckage T2 Hillsbrad",
+		mapID = 1424,
+		object = 180662,
+		coords = {
+			{ 55.1, 60.8 },
+			{ 55.5, 65.2 },
+			{ 56.3, 67.4 },
+			{ 57.5, 69.8 },
+			{ 58.2, 73.6 },
+			{ 59.4, 75.0 },
+			{ 61.7, 78.0 },
+			{ 64.3, 79.9 },
+			{ 65.0, 83.3 },
+			{ 65.7, 85.7 },
+			{ 67.7, 87.9 },
+			{ 28.3, 73.9 },
+			{ 24.3, 68.3 },
+			{ 22.8, 64.9 },
+			{ 34.4, 70.0 },
+			{ 35.9, 70.4 },
+			{ 38.0, 70.7 },
+			{ 40.1, 70.7 },
+			{ 42.3, 70.4 },
+			{ 43.9, 68.8 },
+			{ 46.0, 67.2 },
+			{ 49.7, 63.2 },
+			{ 50.7, 62.4 },
+			{ 51.1, 62.5 },
+		},
+	},
+	{
+		name = "Wreckage T3 Barrens",
+		mapID = 1413,
+		object = 180685,
+		coords = {
+			{ 64.5, 56.1 },
+			{ 63.4, 59.3 },
+			{ 63.9, 58.8 },
+			{ 64.3, 57.8 },
+			{ 64.5, 56.9 },
+		},
+	},
+	{
+		name = "Wreckage T4 Tanaris",
+		mapID = 1446,
+		object = 180751,
+		coords = {
+			{ 66.6, 18.2 },
+			{ 67.9, 22.6 },
+			{ 67.9, 23.4 },
+			{ 67.4, 24.9 },
+			{ 67.5, 25.7 },
+			{ 67.9, 27.2 },
+			{ 68.1, 28.3 },
+			{ 68.1, 29.5 },
+			{ 68.5, 34.6 },
+			{ 67.7, 35.7 },
+			{ 68.0, 36.8 },
+			{ 67.5, 37.8 },
+			{ 67.5, 38.9 },
+			{ 68.2, 39.5 },
+			{ 65.4, 60.2 },
+			{ 65.1, 61.2 },
+			{ 66.2, 60.3 },
+			{ 69.9, 56.2 },
+			{ 73.2, 51.4 },
+			{ 73.7, 50.3 },
+			{ 74.1, 49.6 },
+			{ 74.7, 49.0 },
+			{ 75.5, 47.1 },
+			{ 73.0, 44.2 },
+			{ 72.7, 43.9 },
+			{ 72.1, 42.9 },
+			{ 71.4, 41.8 },
+			{ 71.3, 41.1 },
+			{ 71.1, 40.3 },
+			{ 68.6, 23.0 },
+			{ 67.7, 21.0 },
+			{ 67.4, 19.4 },
+		},
+	},
+	{
+		name = "Wreckage T4 Feralas",
+		mapID = 1444,
+		object = 180751,
+		coords = {
+			{ 33.6, 32.4 },
+			{ 34.4, 34.2 },
+			{ 35.1, 35.3 },
+			{ 36.8, 36.3 },
+			{ 39.5, 37.2 },
+			{ 40.6, 38.6 },
+			{ 41.7, 39.8 },
+			{ 42.9, 40.2 },
+			{ 44.2, 43.5 },
+			{ 44.1, 45.1 },
+			{ 44.2, 46.5 },
+			{ 44.4, 47.8 },
+			{ 44.1, 49.3 },
+			{ 44.1, 51.0 },
+			{ 45.0, 52.5 },
+			{ 46.1, 53.8 },
+			{ 47.9, 53.1 },
+			{ 49.3, 53.5 },
+			{ 49.6, 52.3 },
+			{ 48.0, 50.8 },
+			{ 44.2, 41.6 },
+			{ 44.3, 40.4 },
+			{ 44.0, 40.1 },
+			{ 38.8, 33.8 },
+		},
+	},
+	{
+		name = "Wreckage T4 Stranglethorn",
+		mapID = 1434,
+		object = 180901,
+		coords = {
+			{ 34.7, 34.2 },
+			{ 32.4, 35.5 },
+			{ 31.8, 36.5 },
+			{ 29.4, 37.2 },
+			{ 28.9, 37.7 },
+			{ 27.9, 39.0 },
+			{ 26.9, 40.9 },
+			{ 27.1, 42.3 },
+			{ 26.9, 44.5 },
+			{ 27.2, 46.6 },
+			{ 26.0, 48.6 },
+			{ 24.6, 49.9 },
+			{ 23.8, 47.4 },
+			{ 22.7, 48.8 },
+			{ 22.1, 51.1 },
+			{ 22.5, 52.8 },
+			{ 22.1, 55.2 },
+			{ 22.8, 56.4 },
+			{ 26.2, 58.3 },
+			{ 24.3, 59.4 },
+			{ 23.8, 61.4 },
+			{ 23.7, 63.1 },
+			{ 23.9, 65.4 },
+			{ 25.4, 66.8 },
+			{ 26.7, 69.9 },
+			{ 26.5, 74.1 },
+			{ 27.3, 74.7 },
+			{ 27.9, 76.0 },
+			{ 27.5, 76.5 },
+			{ 26.1, 82.5 },
+			{ 26.5, 84.7 },
+			{ 27.8, 83.5 },
+			{ 29.3, 83.6 },
+			{ 30.7, 83.2 },
+			{ 31.7, 82.0 },
+			{ 32.6, 80.6 },
+			{ 33.7, 78.0 },
+			{ 34.0, 74.7 },
+			{ 36.4, 69.9 },
+			{ 38.5, 62.8 },
+			{ 41.1, 60.5 },
+			{ 41.4, 59.4 },
+			{ 41.7, 57.9 },
+			{ 34.2, 36.6 },
+			{ 35.1, 36.0 },
+		},
+	},
+}
+
+-- The routes every install got before seeds were tracked by name (0.3.1 and older).
+L.LEGACY_SEEDS = { "Angor Battered", "Angor Dented" }
+
+-- The arrival radius of a route: its own (wreckage routes) or the setting.
+function L.radiusOf(route, settings)
+	return route and route.radius or settings.radius
+end
+
+-- Whether arriving at or skipping a point records a visit. Off for routes whose objects the client can't
+-- detect: every visit would count as empty and the spots would go cold.
+function L.tracksVisits(route)
+	return not (route and route.detect == false)
+end
+
 function L.seedRoutes()
-	return {
+	local routes = {
 		seedRoute("Angor Battered", "Battered", "upstairs", {
 			{ 40.8, 26.7 },
 			{ 41.4, 26.3 },
@@ -51,6 +276,14 @@ function L.seedRoutes()
 			{ 39.7, 27.6 },
 		}),
 	}
+	for _, w in ipairs(WRECKAGE) do
+		local r = seedRoute(w.name, "Wreckage", nil, w.coords, w.mapID)
+		r.objects = { [w.object] = true }
+		r.radius = L.WRECKAGE_RADIUS
+		r.detect = false
+		routes[#routes + 1] = r
+	end
+	return routes
 end
 
 -- ---------------------------------------------------------------------------------------------------------

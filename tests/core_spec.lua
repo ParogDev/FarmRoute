@@ -24,6 +24,59 @@ describe("FarmRoute core", function()
 		assert.is_nil(FarmRouteDB.routes["Angor Dented"])
 	end)
 
+	it("seeds the wreckage routes: their pool, a shore radius and no visit tracking", function()
+		mock.login(nil)
+		local r = FarmRouteDB.routes["Wreckage T4 Stranglethorn"]
+		assert.is_not_nil(r)
+		assert.equals(45, #r.points)
+		assert.equals(1434, r.points[1].mapID)
+		assert.is_true(r.objects[180901])
+		assert.equals(20, r.radius)
+		assert.is_false(r.detect)
+		assert.equals(26, #FarmRouteDB.routes["Wreckage T2 Wetlands"].points)
+		assert.equals(5, #FarmRouteDB.routes["Wreckage T3 Barrens"].points)
+		assert.equals("Angor Battered", FarmRouteDB.active)
+		assert.is_string(FarmRouteDB.selftest.seedMaps["Wreckage T3 Barrens"])
+	end)
+
+	it("adds new seed routes to an older install without bringing back deleted ones", function()
+		-- 0.3.1 saved data: seeded, no per-name record, Angor Dented deleted by the player
+		local saved = { seeded = true, active = "Angor Battered", routes = {} }
+		for _, r in ipairs(ns.Logic.seedRoutes()) do
+			if r.name == "Angor Battered" then
+				saved.routes[r.name] = r
+			end
+		end
+		mock.login(saved)
+		assert.is_nil(FarmRouteDB.routes["Angor Dented"])
+		assert.is_not_nil(FarmRouteDB.routes["Wreckage T4 Tanaris"])
+		-- a deleted wreckage route stays deleted on the next login
+		saved = FarmRouteDB
+		saved.routes["Wreckage T4 Tanaris"] = nil
+		mock.install()
+		ns = mock.load()
+		mock.login(saved)
+		assert.is_nil(FarmRouteDB.routes["Wreckage T4 Tanaris"])
+	end)
+
+	it("arrives at a wreckage spot from 20 yd and records no empty visit", function()
+		mock.login(nil)
+		SlashCmdList.FARMROUTE("route Wreckage T3 Barrens")
+		SlashCmdList.FARMROUTE("on")
+		local route = ns.activeRoute()
+		local p = route.points[1]
+		mock.pos = { p.x + 15 / mock.YARDS, p.y } -- on the shore, 15 yards from the pool
+		mock.gameTime = mock.gameTime + 5
+		mock.tick()
+		mock.gameTime = mock.gameTime + 1
+		mock.tick()
+		assert.equals(2, ns.currentIndex())
+		assert.is_true(FarmRouteDB.checked["Wreckage T3 Barrens"][1])
+		assert.is_nil((FarmRouteDB.history["Wreckage T3 Barrens"] or {})[1])
+		SlashCmdList.FARMROUTE("skip")
+		assert.is_nil((FarmRouteDB.history["Wreckage T3 Barrens"] or {})[2])
+	end)
+
 	it("writes the selftest with the code version on login", function()
 		mock.login(nil)
 		local st = FarmRouteDB.selftest
