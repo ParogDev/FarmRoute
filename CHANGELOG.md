@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Six new seed routes for Floating Wreckage fishing pools, one per zone: Wetlands and Hillsbrad (Watertight Trunk, tier 2), The Barrens (Iron Bound Trunk, tier 3), Tanaris, Feralas and Stranglethorn (Mithril Bound Trunk, tier 4). The spawn points come from Forever Questlog and are ordered as a loop along the shore. Pick one with `/fr route Wreckage T4 Tanaris`.
+- A wreckage spot counts as reached within 20 yd, so you can stand on the shore. Pools can't be detected, so these routes keep no visit history and every spot stays in the loop.
+- Existing installs get new seed routes at login. A seed route you deleted stays deleted.
+
 ## 0.3.1
 
 - `/fr learn accept` keeps the old path points of any stretch you didn't walk straight through, and says how many it kept. Path points on another continent stay too.

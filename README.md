@@ -13,6 +13,16 @@ Addons can't draw on the ground. The client gives a screen position only for the
 
 It comes with two seed routes: the Battered Footlocker loop (upper floor) and the Dented Footlocker loop (lower floor) at Angor Fortress in the Badlands, from Wowhead's Forever spawn data for objects 179490 and 179492.
 
+It also has a Floating Wreckage fishing route for each zone that has one, from Forever Questlog's spawn data. The tier is the trunk the pool drops:
+
+| Route | Trunk |
+|---|---|
+| Wreckage T2 Wetlands, Wreckage T2 Hillsbrad | Watertight Trunk |
+| Wreckage T3 Barrens | Iron Bound Trunk |
+| Wreckage T4 Tanaris, Wreckage T4 Feralas, Wreckage T4 Stranglethorn | Mithril Bound Trunk |
+
+Stonetalon Mountains, Arathi Highlands and Azshara have tier 2 and tier 4 pools too, but no spawn list was found for them. On a wreckage route a spot counts as reached within 20 yards, so you can stand on the shore.
+
 ## Commands
 
 | Command | What it does |
