@@ -36,6 +36,7 @@ Stonetalon Mountains, Arathi Highlands and Azshara have tier 2 and tier 4 pools 
 | `/fr radius <yards>`, `/fr auto on\|off` | Arrival radius, and whether arriving moves the pin |
 | `/fr respawn <minutes> [n]`, `/fr timers reset` | Respawn timers |
 | `/fr mode pin\|tomtom`, `/fr line`, `/fr map`, `/fr minimap` | Display options |
+| `/fr marker on\|off` | Show or hide the on-screen marker, its distance and the line. The route keeps running. Also a checkbox in Options > AddOns > FarmRoute and in the route picker. Shown by default |
 | `/fr skip` (or the Skip keybind), `/fr follow on\|off` | Skip the point; follow chests the game soft-targets |
 | `/fr suggestskip on\|off`, `/fr autoskip on\|off` | When nothing is detected near a point: say so, or move on |
 | `/fr fixinteract`, `/fr restorecvars`, `/fr interact` | Turn chest detection on, put your settings back, show who changed the interact key |

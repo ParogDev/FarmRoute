@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- New option to hide the on-screen marker, its distance in yards and the line to the next spot. It helps when fishing from far off, where the distance never comes down. The route keeps running and the world map and minimap still draw it. Turn it on in Options > AddOns > FarmRoute, with the checkbox in the route picker (`/fr`), or with `/fr marker off`. It is off by default, so the marker still shows.
+
 ## 0.3.3
 
 - Route picker: `/fr` (or `/fr routes`) opens a window listing every route, grouped into Floating Wreckage fishing (by trunk tier), Lockpicking and your own routes. Pick one to see its zone, whether you are in it, the spot count, the trunk it drops and where on the zone map the spots are.
