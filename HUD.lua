@@ -550,6 +550,9 @@ local function fillRows(f)
 			or ""
 	)
 	showDetail(f, selectedInfo)
+	if f.hide then
+		f.hide:SetChecked(ns.db.settings.hideMarker == true)
+	end
 end
 
 local function buildPicker()
@@ -638,6 +641,17 @@ local function buildPicker()
 		end
 		WorldMapFrame:SetMapID(info.mapID)
 		ns.MapLines.refresh()
+	end)
+	-- the same setting as /fr marker and Options > AddOns > FarmRoute
+	f.hide = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+	f.hide:SetSize(24, 24)
+	f.hide:SetPoint("BOTTOMLEFT", f.map, "TOPLEFT", -4, 6)
+	if f.hide.Text then
+		f.hide.Text:SetText("Hide the on-screen marker and line")
+		f.hide.Text:SetFontObject("GameFontHighlightSmall")
+	end
+	f.hide:SetScript("OnClick", function(self)
+		ns.setHideMarker(self:GetChecked())
 	end)
 	if WorldMapFrame then
 		WorldMapFrame:HookScript("OnHide", clearPreview)

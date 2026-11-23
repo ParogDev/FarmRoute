@@ -6,7 +6,7 @@ FarmRoute = ns
 
 local L, Nav, MapLines = ns.Logic, ns.Nav, ns.MapLines
 
-ns.VERSION = "0.3.3"
+ns.VERSION = "0.3.4"
 local DB_VERSION = 1
 local TICK = 0.25
 local MIN_GAP = 1.0 -- seconds between two arrival advances, so a point inside the radius of the last isn't skipped
@@ -16,6 +16,7 @@ local DEFAULTS = {
 	mode = "pin",
 	autoAdvance = true,
 	screenLine = true,
+	hideMarker = false, -- hide the on-screen marker, its yards and the line (the route still runs)
 	mapLines = true,
 	minimapDots = true,
 	keepInteract = true,
@@ -739,7 +740,8 @@ local function tick()
 		ns.guard("via", viaTick, route, i)
 		ns.guard("learn", learnTick, route)
 	end
-	Nav.updateScreenLine(ns.db.settings.screenLine, ns.db.settings.radius, ns.markerInfo())
+	local s = ns.db.settings
+	Nav.updateScreenLine(s.screenLine, s.radius, ns.markerInfo(), s.hideMarker)
 	if not route or not i then
 		return
 	end
@@ -835,6 +837,7 @@ function selftest.snapshot(phase)
 		maps = MapLines.status,
 		seedMaps = seedMaps(),
 		settings = ns.db.settings,
+		settingsPanel = selftest.settingsPanel or "not registered yet",
 		counters = counters,
 		interact = ns.interactState(),
 		interactLast = ns.db.interactLog and ns.db.interactLog[#ns.db.interactLog] or nil,
@@ -893,6 +896,7 @@ local HELP = {
 	"/fr radius <yards> - arrival distance (now %d); /fr auto on|off - advance on arrival",
 	"/fr respawn <minutes> [n] - respawn timer for the route or point n (0 = off); /fr timers reset",
 	"/fr mode pin|tomtom - Blizzard's in-world pin or TomTom's arrow; /fr line on|off; /fr map on|off; /fr minimap on|off",
+	"/fr marker on|off - the on-screen marker, its yards and the line (also in Options > AddOns > FarmRoute)",
 	"/fr interact - interact key state and who changed it; /fr fixinteract - turn it on; /fr keepinteract on|off - keep it on",
 	"/fr probe [on|off] - what soft-interact has measured (chat line per change when on)",
 	"/fr follow on|off - a detected chest becomes the objective; /fr suggestskip | autoskip on|off - near a point with nothing detected",
@@ -1266,6 +1270,66 @@ end
 
 function commands.line(arg)
 	toggle("screenLine", arg, "on-screen line")
+end
+
+-- Hide or show the on-screen marker, its yards and the line; the route, the pin logic and the map lines go
+-- on. The settings panel and the picker's tick box come through here too, so they stay in step.
+function ns.setHideMarker(hide)
+	ns.db.settings.hideMarker = hide and true or false
+	if hide then
+		Nav.hideMarker("hidden by setting (/fr marker)")
+	end
+	if ns.refreshPicker then
+		ns.refreshPicker()
+	end
+	if ns.settingsCheckbox and ns.settingsCheckbox:GetValue() ~= ns.db.settings.hideMarker then
+		ns.settingsCheckbox:SetValue(ns.db.settings.hideMarker)
+	end
+end
+
+-- Options > AddOns > FarmRoute: the tick box for hideMarker. A proxy setting, so a click goes through
+-- ns.setHideMarker like /fr marker does.
+function ns.registerSettings()
+	if not (Settings and Settings.RegisterVerticalLayoutCategory) then
+		selftest.settingsPanel = "Settings API missing"
+		return
+	end
+	local category = Settings.RegisterVerticalLayoutCategory("FarmRoute")
+	local setting = Settings.RegisterProxySetting(
+		category,
+		"FARMROUTE_HIDE_MARKER",
+		Settings.VarType.Boolean,
+		"Hide the on-screen marker and line",
+		Settings.Default.False,
+		function()
+			return ns.db.settings.hideMarker == true
+		end,
+		function(value)
+			ns.setHideMarker(value)
+		end
+	)
+	Settings.CreateCheckbox(
+		category,
+		setting,
+		"Hides the marker above the next spot, its distance in yards and the line to it. The route still runs "
+			.. "and the world map and minimap still show it. Handy when fishing from far off, where the "
+			.. "distance never comes down. Same as /fr marker off."
+	)
+	Settings.RegisterAddOnCategory(category)
+	ns.settingsCheckbox = setting
+	selftest.settingsPanel = "registered"
+end
+
+-- /fr marker on|off: show or hide the on-screen marker and line.
+function commands.marker(arg)
+	local hide
+	if arg == "on" or arg == "off" then
+		hide = arg == "off"
+	else
+		hide = not ns.db.settings.hideMarker
+	end
+	ns.setHideMarker(hide)
+	say("on-screen marker and line " .. onOff(not hide))
 end
 
 function commands.map(arg)
@@ -1691,6 +1755,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
 			ns.initDB(FarmRouteDB)
 			guard("hookInteract", ns.hookInteract)
 			guard("hookTooltips", ns.Detect.hookTooltips)
+			guard("settingsPanel", ns.registerSettings)
 		end
 	elseif event == "CVAR_UPDATE" then
 		if ns.db then
